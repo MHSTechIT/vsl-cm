@@ -1,8 +1,5 @@
 import { Router } from 'express'
 import multer from 'multer'
-import { fileURLToPath } from 'node:url'
-import { dirname, join, extname } from 'node:path'
-import { mkdirSync } from 'node:fs'
 import { query } from '../db.js'
 import { config } from '../config.js'
 import { releaseExpiredHolds } from '../lib/holds.js'
@@ -12,18 +9,18 @@ import { setSetting, getSettings } from '../lib/settings.js'
 
 export const adminRouter = Router()
 
-// uploads/ lives at the server root; index.js serves it statically at /uploads.
-// Create it on startup — it's gitignored, so it won't exist on a fresh deploy.
-export const uploadsDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'uploads')
-mkdirSync(uploadsDir, { recursive: true })
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadsDir),
-  filename: (_req, file, cb) => {
-    const stamp = Date.now()
-    cb(null, `${file.fieldname}_${stamp}${extname(file.originalname) || ''}`)
-  },
-})
-const upload = multer({ storage, limits: { fileSize: 1024 * 1024 * 1024 } }) // 1GB
+// Files are stored IN the database (media table), so multer keeps them in memory
+// just long enough to insert the bytes. (Heavier on RAM for big videos.)
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 150 * 1024 * 1024 } })
+
+// Save an uploaded file's bytes into the media table; returns its id.
+async function storeMedia(kind, file) {
+  const { rows } = await query(
+    `INSERT INTO media (kind, mimetype, data) VALUES ($1, $2, $3) RETURNING id`,
+    [kind, file.mimetype || 'application/octet-stream', file.buffer],
+  )
+  return rows[0].id
+}
 
 // Simple shared-token auth for the whole admin API.
 adminRouter.use((req, res, next) => {
@@ -215,22 +212,28 @@ adminRouter.post(
 adminRouter.get(
   '/config',
   ah(async (_req, res) => {
-    const s = await getSettings(['video_file', 'thumb_file', 'reveal_seconds'])
+    const s = await getSettings(['video_id', 'thumb_id', 'reveal_seconds'])
     res.json({
-      videoFile: s.video_file || null,
-      thumbFile: s.thumb_file || null,
+      videoId: s.video_id ? Number(s.video_id) : null,
+      thumbId: s.thumb_id ? Number(s.thumb_id) : null,
       revealSeconds: s.reveal_seconds != null ? Number(s.reveal_seconds) : 900,
     })
   }),
 )
 
-// Save config — optional video/thumbnail files + the reveal time (multipart).
+// Save config — optional video/thumbnail (stored in DB) + the reveal time.
 adminRouter.post(
   '/config',
   upload.fields([{ name: 'video', maxCount: 1 }, { name: 'thumb', maxCount: 1 }]),
   ah(async (req, res) => {
-    if (req.files?.video?.[0]) await setSetting('video_file', req.files.video[0].filename)
-    if (req.files?.thumb?.[0]) await setSetting('thumb_file', req.files.thumb[0].filename)
+    if (req.files?.video?.[0]) {
+      const id = await storeMedia('video', req.files.video[0])
+      await setSetting('video_id', id)
+    }
+    if (req.files?.thumb?.[0]) {
+      const id = await storeMedia('thumb', req.files.thumb[0])
+      await setSetting('thumb_id', id)
+    }
     if (req.body?.revealSeconds != null && req.body.revealSeconds !== '') {
       const secs = Math.max(0, Math.round(Number(req.body.revealSeconds)) || 0)
       await setSetting('reveal_seconds', secs)
@@ -249,7 +252,7 @@ function mapTestimonial(r) {
     statAfter: r.stat_after,
     statText: r.stat_text,
     today: r.today,
-    imageUrl: r.image_file ? `/uploads/${r.image_file}` : null,
+    imageUrl: r.image_id ? `/media/${r.image_id}` : r.image_file ? `/uploads/${r.image_file}` : null,
   }
 }
 
@@ -268,8 +271,9 @@ adminRouter.post(
     const b = req.body || {}
     const name = String(b.name || '').trim()
     if (!name) return res.status(400).json({ error: 'name is required' })
+    const imageId = req.file ? await storeMedia('report', req.file) : null
     const { rows } = await query(
-      `INSERT INTO testimonials (name, body, stat_before, stat_after, stat_text, today, image_file, sort_order)
+      `INSERT INTO testimonials (name, body, stat_before, stat_after, stat_text, today, image_id, sort_order)
        VALUES ($1,$2,$3,$4,$5,$6,$7, COALESCE((SELECT MAX(sort_order)+1 FROM testimonials), 0))
        RETURNING *`,
       [
@@ -279,7 +283,7 @@ adminRouter.post(
         b.statAfter || null,
         b.statText || null,
         b.today || null,
-        req.file?.filename || null,
+        imageId,
       ],
     )
     res.json(mapTestimonial(rows[0]))

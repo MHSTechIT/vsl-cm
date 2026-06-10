@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { adminApi, getToken, setToken, clearToken } from './adminApi.js'
 import './admin.css'
 
+const API_BASE = import.meta.env.VITE_API_URL || ''
+const abs = (p) => (p ? `${API_BASE}${p}` : '')
 const pct = (n, d) => (d > 0 ? `${((n / d) * 100).toFixed(1)}%` : '—')
 const fmtDate = (iso) =>
   iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'
@@ -514,7 +516,7 @@ function Upload() {
     } catch (e) { setStatus(e.message) }
   }
 
-  const thumbPreview = cfg?.thumbFile ? `/uploads/${cfg.thumbFile}` : null
+  const thumbPreview = cfg?.thumbId ? abs(`/media/${cfg.thumbId}`) : null
   const busy = vProg != null || tProg != null
 
   return (
@@ -538,7 +540,7 @@ function Upload() {
                 <UploadTileProgress p={vProg} />
               ) : (
                 <span className="up-tile-sub">
-                  {cfg?.videoFile ? '✓ uploaded — click to replace' : 'Click to upload'}
+                  {cfg?.videoId ? '✓ uploaded — click to replace' : 'Click to upload'}
                 </span>
               )}
             </label>

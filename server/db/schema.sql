@@ -51,6 +51,15 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT
 );
 
+-- Binary media (video, thumbnail, report images) stored IN the database
+CREATE TABLE IF NOT EXISTS media (
+  id         SERIAL PRIMARY KEY,
+  kind       TEXT,
+  mimetype   TEXT NOT NULL DEFAULT 'application/octet-stream',
+  data       BYTEA NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Proof / testimonial cards shown on the landing page (managed from admin)
 CREATE TABLE IF NOT EXISTS testimonials (
   id          SERIAL PRIMARY KEY,
@@ -60,10 +69,12 @@ CREATE TABLE IF NOT EXISTS testimonials (
   stat_after  TEXT,                     -- e.g. "5.8"
   stat_text   TEXT,                     -- fallback single-line stat (overrides before/after)
   today       TEXT,                     -- the "Today: ..." line
-  image_file  TEXT,                     -- uploaded blood-report image
+  image_file  TEXT,                     -- (legacy) filesystem image name
+  image_id    INTEGER,                  -- media row holding the report image
   sort_order  INTEGER NOT NULL DEFAULT 0,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS image_id INTEGER;
 
 CREATE INDEX IF NOT EXISTS idx_slots_date ON slots (slot_date);
 CREATE INDEX IF NOT EXISTS idx_slots_status ON slots (status);
