@@ -64,8 +64,14 @@ paymentRouter.post(
   ah(async (req, res) => {
     const phone = String(req.body?.phone || '').replace(/\D/g, '')
     if (!phone) return res.status(400).json({ error: 'phone required' })
-    const order = await createOrder(phone)
-    res.json(order)
+    try {
+      const order = await createOrder(phone)
+      res.json(order)
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[payment] order error:', e.message)
+      res.status(502).json({ error: e.message })
+    }
   }),
 )
 

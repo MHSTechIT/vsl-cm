@@ -26,7 +26,16 @@ export async function createOrder(phone) {
       notes: { phone },
     }),
   })
-  if (!res.ok) throw new Error(`razorpay order failed: ${res.status}`)
+  if (!res.ok) {
+    let detail = ''
+    try {
+      const j = await res.json()
+      detail = j?.error?.description || JSON.stringify(j)
+    } catch {
+      /* ignore */
+    }
+    throw new Error(`Razorpay order failed (${res.status}): ${detail}`)
+  }
   const order = await res.json()
   return {
     mock: false,
