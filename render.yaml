@@ -1,0 +1,37 @@
+# Render blueprint for the backend API (optional — you can also set this up
+# manually in the Render dashboard). Secrets are marked sync:false so you fill
+# them in the dashboard, never in git.
+services:
+  - type: web
+    name: vsl-backend
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_SSL
+        value: "false"
+      - key: HOLD_WINDOW_MINUTES
+        value: "12"
+      - key: RAZORPAY_MODE
+        value: mock
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+      - key: PRICE_PAISE
+        value: "9900"
+      - key: WHAPI_TOKEN
+        sync: false
+      - key: WHAPI_BASE_URL
+        value: https://gate.whapi.cloud
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
