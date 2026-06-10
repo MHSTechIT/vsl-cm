@@ -203,6 +203,65 @@
 .dd-opt:hover { background: #f3f0fd; }
 .dd-opt.is-active { background: #efe9fd; color: var(--accent-deep); font-weight: 600; }
 
+/* custom date picker (on-theme replacement for native date input) */
+.dp { position: relative; }
+.dp-input {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  min-width: 160px; font-family: inherit; font-size: 0.85rem;
+  padding: 10px 13px; border: 1px solid var(--line); border-radius: 11px;
+  background: #fcfbff; color: var(--ink); cursor: pointer;
+}
+.dp-input.dp-empty { color: var(--muted); }
+.dp-input:hover { border-color: #ccbff0; }
+.dp-cal { width: 16px; height: 16px; color: var(--accent); }
+.dp-pop {
+  position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; width: 280px;
+  background: #fff; border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: var(--shadow-card); padding: 14px;
+}
+.dp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.dp-month { font-weight: 700; color: var(--accent-deep); font-size: 0.9rem; }
+.dp-nav { display: flex; gap: 4px; }
+.dp-nav button {
+  border: none; background: none; cursor: pointer; font-size: 1.2rem; line-height: 1;
+  color: var(--accent); width: 28px; height: 28px; border-radius: 8px;
+}
+.dp-nav button:hover { background: #f3f0fd; }
+.dp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.dp-wd { text-align: center; font-size: 0.68rem; color: var(--muted); font-weight: 600; padding: 4px 0; }
+.dp-day {
+  border: none; background: none; cursor: pointer; font-family: inherit; font-size: 0.82rem;
+  color: var(--ink); height: 34px; border-radius: 8px;
+}
+.dp-day:hover:not(:disabled) { background: #f3f0fd; }
+.dp-day.is-today { box-shadow: inset 0 0 0 1.5px var(--accent); color: var(--accent-deep); font-weight: 600; }
+.dp-day.is-sel { background: var(--accent); color: #fff; font-weight: 600; }
+.dp-day:disabled { color: #cfc9de; cursor: not-allowed; }
+.dp-foot { display: flex; justify-content: space-between; margin-top: 8px; }
+.dp-link { border: none; background: none; cursor: pointer; color: var(--accent); font-family: inherit; font-size: 0.82rem; }
+.dp-link:hover { text-decoration: underline; }
+
+/* centered alert dialog (replaces native prompt/alert) */
+.adm-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  background: rgba(40, 28, 102, 0.45);
+  -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+}
+.adm-dialog {
+  width: 100%; max-width: 340px; background: #fff;
+  border-radius: 18px; box-shadow: var(--shadow-card); padding: 24px;
+}
+.adm-dialog h3 { color: var(--accent-deep); font-size: 1.1rem; margin: 0 0 4px; text-align: center; }
+.adm-dialog-sub { color: var(--muted); font-size: 0.85rem; text-align: center; margin: 0 0 16px; }
+.adm-dialog input {
+  width: 100%; font-family: inherit; font-size: 1.05rem; text-align: center;
+  padding: 12px; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 16px;
+}
+.adm-dialog input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+.adm-dialog-actions { display: flex; gap: 10px; }
+.adm-dialog-actions .adm-btn { flex: 1; }
+
 /* ---------- table ---------- */
 .adm-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; }
 .adm-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }

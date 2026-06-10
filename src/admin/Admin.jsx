@@ -58,6 +58,83 @@ function Dropdown({ value, onChange, options }) {
   )
 }
 
+// ---------- Custom date picker (on-theme, replaces native date input) ----------
+const WEEKDAYS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']
+function DatePicker({ value, onChange }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  const base = value ? new Date(value + 'T00:00:00') : new Date()
+  const [view, setView] = useState({ y: base.getFullYear(), m: base.getMonth() })
+
+  useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [])
+
+  const pad = (n) => String(n).padStart(2, '0')
+  const iso = (y, m, d) => `${y}-${pad(m + 1)}-${pad(d)}`
+  const t = new Date()
+  const todayISO = iso(t.getFullYear(), t.getMonth(), t.getDate())
+  const firstWd = (new Date(view.y, view.m, 1).getDay() + 6) % 7 // Monday-first
+  const days = new Date(view.y, view.m + 1, 0).getDate()
+  const label = new Date(view.y, view.m, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' })
+  const move = (delta) => {
+    let m = view.m + delta, y = view.y
+    if (m < 0) { m = 11; y -= 1 } else if (m > 11) { m = 0; y += 1 }
+    setView({ y, m })
+  }
+  const display = value ? value.split('-').reverse().join('-') : 'dd-mm-yyyy'
+  const cells = []
+  for (let i = 0; i < firstWd; i++) cells.push(null)
+  for (let d = 1; d <= days; d++) cells.push(d)
+
+  return (
+    <div className="dp" ref={ref}>
+      <button type="button" className={`dp-input ${value ? '' : 'dp-empty'}`} onClick={() => setOpen((o) => !o)}>
+        <span>{display}</span>
+        <svg className="dp-cal" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M7 2v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2H7zm12 8v10H5V10h14z" />
+        </svg>
+      </button>
+      {open && (
+        <div className="dp-pop">
+          <div className="dp-head">
+            <span className="dp-month">{label}</span>
+            <div className="dp-nav">
+              <button type="button" onClick={() => move(-1)} aria-label="Previous month">‹</button>
+              <button type="button" onClick={() => move(1)} aria-label="Next month">›</button>
+            </div>
+          </div>
+          <div className="dp-grid">
+            {WEEKDAYS.map((d) => <span key={d} className="dp-wd">{d}</span>)}
+          </div>
+          <div className="dp-grid">
+            {cells.map((d, i) => {
+              if (!d) return <span key={i} />
+              const cellISO = iso(view.y, view.m, d)
+              const past = cellISO < todayISO
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  disabled={past}
+                  className={`dp-day ${cellISO === value ? 'is-sel' : ''} ${cellISO === todayISO ? 'is-today' : ''}`}
+                  onClick={() => { onChange(cellISO); setOpen(false) }}
+                >{d}</button>
+              )
+            })}
+          </div>
+          <div className="dp-foot">
+            <button type="button" className="dp-link" onClick={() => { onChange(''); setOpen(false) }}>Clear</button>
+            <button type="button" className="dp-link" onClick={() => { onChange(todayISO); setOpen(false) }}>Today</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ---------- Login ----------
 function Login({ onIn }) {
   const [tok, setTok] = useState('')
@@ -275,6 +352,8 @@ function Slots() {
   const [date, setDate] = useState('')
   const [times, setTimes] = useState('8.00am-9.00am, 9.00am-10.00am, 10.00am-11.00am')
   const [msg, setMsg] = useState('')
+  const [seatEdit, setSeatEdit] = useState(null) // { date, time }
+  const [seatVal, setSeatVal] = useState('')
   const load = useCallback(() => adminApi.slots().then(setGroups).catch(() => {}), [])
   useEffect(() => { load() }, [load])
 
@@ -286,13 +365,17 @@ function Slots() {
     try { await adminApi.openDate(date, list); setMsg(`Opened ${list.length} slot(s).`); load() }
     catch (e2) { setMsg(e2.message) }
   }
-  async function setSeats(d, s) {
-    const input = prompt(`Total seats for ${s.time}`, String(s.capacity))
-    if (input == null) return
-    const seats = Math.round(Number(input))
-    if (!Number.isFinite(seats) || seats < 1) return
-    await adminApi.setSeats(d, s.time, seats)
-    load()
+  function openSeats(d, s) {
+    setSeatEdit({ date: d, time: s.time })
+    setSeatVal(String(s.capacity))
+  }
+  async function saveSeats() {
+    const seats = Math.round(Number(seatVal))
+    if (Number.isFinite(seats) && seats >= 1) {
+      await adminApi.setSeats(seatEdit.date, seatEdit.time, seats)
+      load()
+    }
+    setSeatEdit(null)
   }
   async function removeTime(d, time) {
     if (!confirm(`Remove the ${time} slot?`)) return
@@ -312,7 +395,7 @@ function Slots() {
       </div>
 
       <form className="adm-openslot" onSubmit={openDate}>
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <DatePicker value={date} onChange={setDate} />
         <input type="text" value={times} onChange={(e) => setTimes(e.target.value)} placeholder="time slots, comma separated" />
         <button className="adm-btn adm-btn-primary" type="submit">+ Open date</button>
       </form>
@@ -329,7 +412,7 @@ function Slots() {
               <button
                 className={`slot-chip slot-chip--${chipClass(s)}`}
                 key={s.time}
-                onClick={() => setSeats(g.date, s)}
+                onClick={() => openSeats(g.date, s)}
                 title="Click to set total seats"
               >
                 <span className="slot-time">{s.time}</span>
@@ -345,6 +428,27 @@ function Slots() {
         </div>
       ))}
       {groups.length === 0 && <p className="adm-empty">No dates open yet.</p>}
+
+      {seatEdit && (
+        <div className="adm-overlay" onClick={() => setSeatEdit(null)}>
+          <div className="adm-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Total seats</h3>
+            <p className="adm-dialog-sub">{seatEdit.time}</p>
+            <input
+              type="number"
+              min="1"
+              value={seatVal}
+              autoFocus
+              onChange={(e) => setSeatVal(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') saveSeats() }}
+            />
+            <div className="adm-dialog-actions">
+              <button className="adm-btn adm-btn-ghost" onClick={() => setSeatEdit(null)}>Cancel</button>
+              <button className="adm-btn adm-btn-primary" onClick={saveSeats}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   )
 }
