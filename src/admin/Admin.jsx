@@ -460,12 +460,22 @@ const mmssToSecs = (v) => {
   return (m || 0) * 60 + (s || 0)
 }
 
+function UploadTileProgress({ p }) {
+  return (
+    <span className="up-tile-prog">
+      <span className="up-tile-bar"><span style={{ width: `${p}%` }} /></span>
+      {p < 100 ? `Uploading ${p}%` : 'Processing…'}
+    </span>
+  )
+}
+
 function Upload() {
   const [cfg, setCfg] = useState(null)
-  const [video, setVideo] = useState(null)
-  const [thumb, setThumb] = useState(null)
   const [reveal, setReveal] = useState('15:00')
-  const [status, setStatus] = useState('')
+  const [status, setStatus] = useState('')   // timing save
+  const [vProg, setVProg] = useState(null)   // null = idle, else 0..100
+  const [tProg, setTProg] = useState(null)
+  const [err, setErr] = useState('')
 
   const load = useCallback(
     () =>
@@ -477,58 +487,79 @@ function Upload() {
   )
   useEffect(() => { load() }, [load])
 
-  const thumbPreview = thumb
-    ? URL.createObjectURL(thumb)
-    : cfg?.thumbFile ? `/uploads/${cfg.thumbFile}` : null
+  // Upload a single file immediately on selection.
+  async function uploadFile(kind, file, setProg) {
+    if (!file) return
+    setErr('')
+    setProg(0)
+    try {
+      const fd = new FormData()
+      fd.append(kind, file) // 'video' | 'thumb'
+      await adminApi.saveConfig(fd, (p) => setProg(p))
+      await load() // refresh the stored filename / preview
+    } catch (e) {
+      setErr(`${kind === 'video' ? 'Video' : 'Thumbnail'} upload failed: ${e.message}`)
+    } finally {
+      setProg(null)
+    }
+  }
 
-  async function save() {
+  async function saveTiming() {
     setStatus('saving')
     try {
       const fd = new FormData()
-      if (video) fd.append('video', video)
-      if (thumb) fd.append('thumb', thumb)
       fd.append('revealSeconds', String(mmssToSecs(reveal)))
       await adminApi.saveConfig(fd)
-      setVideo(null); setThumb(null)
-      await load()
       setStatus('saved')
     } catch (e) { setStatus(e.message) }
   }
+
+  const thumbPreview = cfg?.thumbFile ? `/uploads/${cfg.thumbFile}` : null
+  const busy = vProg != null || tProg != null
 
   return (
     <section className="adm-panel">
       <div className="adm-panel-head">
         <div>
           <h1 className="adm-h1">Upload</h1>
-          <p className="adm-sub">Set the landing-page video, thumbnail, and booking-button timing</p>
+          <p className="adm-sub">Video &amp; thumbnail upload as soon as you choose them. Save stores the booking timing.</p>
         </div>
       </div>
 
       <div className="up-cardgrid">
         <div className="up-card">
           <div className="up-row">
-            {/* video */}
+            {/* video — uploads on select */}
             <label className="up-tile">
-              <input type="file" accept="video/*" hidden onChange={(e) => setVideo(e.target.files[0] || null)} />
+              <input type="file" accept="video/*" hidden disabled={vProg != null}
+                onChange={(e) => uploadFile('video', e.target.files[0], setVProg)} />
               <span className="up-tile-title">Video</span>
-              <span className="up-tile-sub">
-                {video ? video.name : cfg?.videoFile ? `Current: ${cfg.videoFile}` : 'Click to upload'}
-              </span>
+              {vProg != null ? (
+                <UploadTileProgress p={vProg} />
+              ) : (
+                <span className="up-tile-sub">
+                  {cfg?.videoFile ? '✓ uploaded — click to replace' : 'Click to upload'}
+                </span>
+              )}
             </label>
-            {/* thumbnail */}
-            <label
-              className="up-tile up-tile--thumb"
-              style={thumbPreview ? { backgroundImage: `url(${thumbPreview})` } : undefined}
-            >
-              <input type="file" accept="image/*" hidden onChange={(e) => setThumb(e.target.files[0] || null)} />
-              {!thumbPreview && (
+
+            {/* thumbnail — uploads on select */}
+            <label className="up-tile up-tile--thumb"
+              style={thumbPreview && tProg == null ? { backgroundImage: `url(${thumbPreview})` } : undefined}>
+              <input type="file" accept="image/*" hidden disabled={tProg != null}
+                onChange={(e) => uploadFile('thumb', e.target.files[0], setTProg)} />
+              {tProg != null ? (
+                <UploadTileProgress p={tProg} />
+              ) : !thumbPreview ? (
                 <>
                   <span className="up-tile-title">Thumbnail</span>
                   <span className="up-tile-sub">Click to upload</span>
                 </>
-              )}
+              ) : null}
             </label>
           </div>
+
+          {err && <p className="reg-error" style={{ textAlign: 'center' }}>{err}</p>}
 
           {/* booking-reveal time */}
           <div className="up-reveal">
@@ -541,7 +572,7 @@ function Upload() {
             />
           </div>
 
-          <button className="adm-btn adm-btn-primary up-save" onClick={save} disabled={status === 'saving'}>
+          <button className="adm-btn adm-btn-primary up-save" onClick={saveTiming} disabled={status === 'saving' || busy}>
             {status === 'saving' ? 'Saving…' : 'Save'}
           </button>
         </div>

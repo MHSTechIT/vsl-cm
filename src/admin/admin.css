@@ -311,6 +311,15 @@
 .up-tile-title { font-weight: 600; color: var(--ink); font-size: 0.85rem; }
 .up-tile-sub { font-size: 0.72rem; color: var(--muted); word-break: break-word; }
 .up-tile--thumb { overflow: hidden; }
+.up-tile-prog {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  width: 100%; font-size: 0.72rem; font-weight: 600; color: var(--accent-deep);
+}
+.up-tile-bar { width: 82%; height: 6px; background: #dfd7f5; border-radius: 99px; overflow: hidden; }
+.up-tile-bar > span {
+  display: block; height: 100%; border-radius: 99px;
+  background: linear-gradient(90deg, var(--accent-light), var(--accent-dark)); transition: width 0.15s ease;
+}
 
 .up-reveal {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -323,6 +332,18 @@
   padding: 7px 10px; border: 1px solid var(--line); border-radius: 99px; background: #fff;
 }
 .up-save { width: 60%; margin: 0 auto; }
+
+/* upload progress */
+.up-progress { margin-top: 4px; }
+.up-progress-bar {
+  height: 8px; background: #ece7f8; border-radius: 99px; overflow: hidden;
+}
+.up-progress-fill {
+  height: 100%; border-radius: 99px;
+  background: linear-gradient(90deg, var(--accent-light), var(--accent-dark));
+  transition: width 0.15s ease;
+}
+.up-progress-label { display: block; text-align: center; font-size: 0.74rem; color: var(--muted); margin-top: 6px; }
 
 /* testimonial manager */
 .up-card--wide { max-width: 560px; }

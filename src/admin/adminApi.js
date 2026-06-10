@@ -34,10 +34,33 @@ async function postForm(path, formData) {
   return res.json()
 }
 
+// multipart POST with upload-progress (XHR exposes upload.onprogress; fetch can't)
+function postFormProgress(path, formData, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${BASE}/api/admin${path}`)
+    xhr.setRequestHeader('Authorization', `Bearer ${getToken()}`)
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100))
+    }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try { resolve(JSON.parse(xhr.responseText || '{}')) } catch { resolve({}) }
+      } else {
+        let msg = 'upload failed'
+        try { msg = JSON.parse(xhr.responseText).error || msg } catch { /* ignore */ }
+        reject(new Error(msg))
+      }
+    }
+    xhr.onerror = () => reject(new Error('network error'))
+    xhr.send(formData)
+  })
+}
+
 export const adminApi = {
   stats: () => req('/stats'),
   getConfig: () => req('/config'),
-  saveConfig: (formData) => postForm('/config', formData),
+  saveConfig: (formData, onProgress) => postFormProgress('/config', formData, onProgress),
   listTestimonials: () => req('/testimonials'),
   addTestimonial: (formData) => postForm('/testimonials', formData),
   deleteTestimonial: (id) => req(`/testimonials/${id}`, { method: 'DELETE' }),
