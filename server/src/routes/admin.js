@@ -2,6 +2,7 @@ import { Router } from 'express'
 import multer from 'multer'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, extname } from 'node:path'
+import { mkdirSync } from 'node:fs'
 import { query } from '../db.js'
 import { config } from '../config.js'
 import { releaseExpiredHolds } from '../lib/holds.js'
@@ -11,8 +12,10 @@ import { setSetting, getSettings } from '../lib/settings.js'
 
 export const adminRouter = Router()
 
-// uploads/ lives at the server root; index.js serves it statically at /uploads
+// uploads/ lives at the server root; index.js serves it statically at /uploads.
+// Create it on startup — it's gitignored, so it won't exist on a fresh deploy.
 export const uploadsDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'uploads')
+mkdirSync(uploadsDir, { recursive: true })
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadsDir),
   filename: (_req, file, cb) => {
