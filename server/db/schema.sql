@@ -1,0 +1,75 @@
+-- ============================================================
+-- Phase 2 schema — leads + slots
+-- Run with:  npm run db:setup   (or paste into pgAdmin)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS leads (
+  phone            TEXT PRIMARY KEY,          -- unique identifier for the whole journey
+  name             TEXT NOT NULL,
+  registered_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  -- watch-time tracking
+  watch_percent    INTEGER NOT NULL DEFAULT 0,
+  hit_25           BOOLEAN NOT NULL DEFAULT false,
+  hit_8min         BOOLEAN NOT NULL DEFAULT false,
+  hit_15min        BOOLEAN NOT NULL DEFAULT false,
+  finished         BOOLEAN NOT NULL DEFAULT false,
+
+  -- booking
+  form2_submitted  BOOLEAN NOT NULL DEFAULT false,
+  slot_date        DATE,
+  slot_time        TEXT,
+  slot_status      TEXT,                      -- pending | confirmed (null = none)
+
+  -- payment
+  paid             BOOLEAN NOT NULL DEFAULT false,
+  paid_at          TIMESTAMPTZ,
+
+  -- WhatsApp automation queue (used when Whapi token is absent / for review)
+  needs_wa         TEXT,                      -- 'rescue' | 'confirmation' | null
+  wa_sent_at       TIMESTAMPTZ,
+
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- One row per bookable seat (date + time). "10-20 slots/day" = number of times.
+CREATE TABLE IF NOT EXISTS slots (
+  id               SERIAL PRIMARY KEY,
+  slot_date        DATE NOT NULL,
+  slot_time        TEXT NOT NULL,             -- e.g. "18:00"
+  status           TEXT NOT NULL DEFAULT 'available', -- available | pending | confirmed
+  held_by_phone    TEXT,
+  hold_expires_at  TIMESTAMPTZ,
+  lead_phone       TEXT,                      -- owner once confirmed
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (slot_date, slot_time)
+);
+
+-- Key/value config (current video, thumbnail, booking-reveal time, etc.)
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT
+);
+
+-- Proof / testimonial cards shown on the landing page (managed from admin)
+CREATE TABLE IF NOT EXISTS testimonials (
+  id          SERIAL PRIMARY KEY,
+  name        TEXT NOT NULL,            -- "Rajan, 47 — software professional, Chennai"
+  body        TEXT,                     -- the description line
+  stat_before TEXT,                     -- e.g. "9.2"
+  stat_after  TEXT,                     -- e.g. "5.8"
+  stat_text   TEXT,                     -- fallback single-line stat (overrides before/after)
+  today       TEXT,                     -- the "Today: ..." line
+  image_file  TEXT,                     -- uploaded blood-report image
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_slots_date ON slots (slot_date);
+CREATE INDEX IF NOT EXISTS idx_slots_status ON slots (status);
+CREATE INDEX IF NOT EXISTS idx_leads_paid ON leads (paid);
+
+-- Each (date,time) can now hold MULTIPLE seats (one row per seat), so the
+-- old one-row-per-time uniqueness is dropped.
+ALTER TABLE slots DROP CONSTRAINT IF EXISTS slots_slot_date_slot_time_key;
+CREATE INDEX IF NOT EXISTS idx_slots_date_time ON slots (slot_date, slot_time);
