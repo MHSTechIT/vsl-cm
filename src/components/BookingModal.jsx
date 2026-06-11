@@ -92,6 +92,7 @@ export default function BookingModal({ onClose }) {
   const doneRef = useRef(false)
   const linkModeRef = useRef(false)
   const payingPhone = useRef('')
+  const attemptSince = useRef(0) // epoch secs when this pay attempt began
 
   // load available dates + config (payment link) on open
   useEffect(() => {
@@ -117,7 +118,7 @@ export default function BookingModal({ onClose }) {
         return
       }
       try {
-        const s = await api.paymentStatus(phone, orderId)
+        const s = await api.paymentStatus(phone, orderId, attemptSince.current)
         if (s.paid) {
           finish({ date: s.date, time: s.time })
           try { rzpRef.current?.close?.() } catch { /* modal may already be gone */ }
@@ -179,6 +180,10 @@ export default function BookingModal({ onClose }) {
       setErr('Please enter your details and pick a date + time.')
       return
     }
+
+    // Anchor this attempt in time: the backend only confirms payments made
+    // at/after this instant, so a stale/earlier payment can't false-confirm.
+    attemptSince.current = Math.floor(Date.now() / 1000)
 
     // Hosted-link mode: open a blank tab NOW (inside the click) so the browser
     // doesn't block it after our async calls; we point it at the link below.
@@ -262,7 +267,7 @@ export default function BookingModal({ onClose }) {
   async function recheckPayment() {
     setErr('')
     try {
-      const s = await api.paymentStatus(payingPhone.current)
+      const s = await api.paymentStatus(payingPhone.current, undefined, attemptSince.current)
       if (s.paid) finish({ date: s.date, time: s.time })
       else setErr('Not confirmed yet — give it a few seconds after paying, then check again.')
     } catch {

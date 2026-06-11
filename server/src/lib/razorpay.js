@@ -99,12 +99,24 @@ export async function orderHasCapturedPayment(orderId) {
 // For a static hosted payment link there's no order id to reconcile against,
 // so ask Razorpay for a recently-captured payment whose payer contact matches
 // this lead's phone. Looks back `windowMins` (default 2h). Live keys only.
-export async function recentCapturedPaymentForPhone(phone, windowMins = 120) {
+// Find a Razorpay payment made by this phone for the CURRENT booking attempt.
+// `sinceEpoch` (seconds) anchors the search to when the payer clicked pay, so a
+// payment from an earlier session/test can never be mistaken for this one.
+// `minAmountPaise` rejects a smaller payment (e.g. a leftover ₹1 test page)
+// from confirming a ₹50 booking.
+export async function recentCapturedPaymentForPhone(
+  phone,
+  { sinceEpoch = null, minAmountPaise = 0, windowMins = 20 } = {},
+) {
   if (isMock() || !keyId || !keySecret) return null
   const last10 = String(phone).replace(/\D/g, '').slice(-10)
   if (last10.length !== 10) return null
   const auth = Buffer.from(`${keyId}:${keySecret}`).toString('base64')
-  const from = Math.floor(Date.now() / 1000) - windowMins * 60
+  // Anchor to the attempt start when we have it; otherwise a short window.
+  // A 5-min slack absorbs browser/Razorpay clock skew without re-admitting
+  // hour-old payments.
+  const windowFrom = Math.floor(Date.now() / 1000) - windowMins * 60
+  const from = sinceEpoch ? Math.max(sinceEpoch - 300, windowFrom) : windowFrom
   const res = await fetch(`https://api.razorpay.com/v1/payments?count=100&from=${from}`, {
     headers: { Authorization: `Basic ${auth}` },
   })
@@ -113,7 +125,9 @@ export async function recentCapturedPaymentForPhone(phone, windowMins = 120) {
   const match = (j.items || []).find(
     (p) =>
       (p.status === 'captured' || p.status === 'authorized') &&
-      String(p.contact || '').replace(/\D/g, '').slice(-10) === last10,
+      String(p.contact || '').replace(/\D/g, '').slice(-10) === last10 &&
+      (p.created_at || 0) >= from && // belongs to this attempt, not an old one
+      (p.amount || 0) >= minAmountPaise, // and is at least the expected price
   )
   if (!match) return null
   // capture it if it's only authorized (manual-capture accounts)

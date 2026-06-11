@@ -50,8 +50,11 @@ export const api = {
     req('/api/payment/order', { method: 'POST', body: JSON.stringify({ phone }) }),
   verifyPayment: (payload) =>
     req('/api/payment/verify', { method: 'POST', body: JSON.stringify(payload) }),
-  paymentStatus: (phone, orderId) =>
-    req(
-      `/api/payment/status/${encodeURIComponent(phone)}${orderId ? `?order=${encodeURIComponent(orderId)}` : ''}`,
-    ),
+  paymentStatus: (phone, orderId, since) => {
+    const qs = new URLSearchParams()
+    if (orderId) qs.set('order', orderId)
+    if (since) qs.set('since', String(since))
+    const tail = qs.toString() ? `?${qs}` : ''
+    return req(`/api/payment/status/${encodeURIComponent(phone)}${tail}`)
+  },
 }

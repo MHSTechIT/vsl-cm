@@ -13,22 +13,26 @@ slotsRouter.get(
   ah(async (_req, res) => {
     await releaseExpiredHolds()
     await applyDripAll()
+    // 'pending' (a seat someone is mid-payment on) counts as still bookable —
+    // a slot only closes once payment is CONFIRMED. 'blocked'/'permanent' stay
+    // closed (scarcity / manually reserved).
     const { rows } = await query(
       `SELECT slot_date,
-              COUNT(*) FILTER (WHERE status = 'available') AS available
+              COUNT(*) FILTER (WHERE status IN ('available','pending')) AS available
          FROM slots
         WHERE slot_date >= CURRENT_DATE
         GROUP BY slot_date
-        HAVING COUNT(*) FILTER (WHERE status = 'available') > 0
+        HAVING COUNT(*) FILTER (WHERE status IN ('available','pending')) > 0
         ORDER BY slot_date`,
     )
     res.json(rows.map((r) => ({ date: isoDate(r.slot_date), available: Number(r.available) })))
   }),
 )
 
-// Times for a date. `total` includes blocked/held/confirmed seats, so the
-// booking form shows them as already booked (left of total) — full times
-// return left:0 so they render disabled instead of hidden.
+// Times for a date. A time only shows BOOKED once its seats are CONFIRMED
+// (paid) or held back by scarcity ('blocked'/'permanent'). A seat someone is
+// mid-payment on ('pending') still counts as bookable, so a slot never closes
+// until the payment actually completes.
 slotsRouter.get(
   '/',
   ah(async (req, res) => {
@@ -38,7 +42,7 @@ slotsRouter.get(
     await applySlotDrip(date)
     const { rows } = await query(
       `SELECT slot_time,
-              COUNT(*) FILTER (WHERE status='available') AS left,
+              COUNT(*) FILTER (WHERE status IN ('available','pending')) AS left,
               COUNT(*) AS total
          FROM slots
         WHERE slot_date = $1

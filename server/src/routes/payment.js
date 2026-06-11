@@ -353,22 +353,31 @@ paymentRouter.get(
   ah(async (req, res) => {
     const phone = String(req.params.phone || '').replace(/\D/g, '')
     const orderId = String(req.query.order || '')
+    // `since` (epoch seconds) = when the payer started THIS attempt, so a
+    // payment from an earlier session can't falsely confirm this booking.
+    const since = Number(req.query.since) || null
     if (!phone) return res.json({ paid: false })
 
     const { rows } = await query(
-      `SELECT paid, slot_date, slot_time, slot_status, rzp_order_id FROM leads WHERE phone = $1`,
+      `SELECT paid, paid_at, slot_date, slot_time, slot_status, rzp_order_id FROM leads WHERE phone = $1`,
       [phone],
     )
     if (!rows.length) return res.json({ paid: false })
     const lead = rows[0]
 
-    // Paid + nothing newer pending = settled. (With an order id supplied we
-    // also require it to be the order we know about, so a NEW attempt by a
-    // previously-paid lead isn't reported done before its money arrives.)
+    // Paid + nothing newer pending = settled. We scope this to the CURRENT
+    // attempt so a previously-paid lead re-booking isn't reported done before
+    // their new money arrives: with an order id it must match the known order;
+    // with a `since` anchor (hosted link) the payment must be at/after it.
+    const paidAtEpoch = lead.paid_at ? Math.floor(new Date(lead.paid_at).getTime() / 1000) : 0
     const settled =
       lead.paid &&
       lead.slot_status === 'confirmed' &&
-      (!orderId || orderId === lead.rzp_order_id)
+      (orderId
+        ? orderId === lead.rzp_order_id
+        : since
+          ? paidAtEpoch >= since
+          : true)
     if (settled) {
       return res.json({
         paid: true,
@@ -384,8 +393,17 @@ paymentRouter.get(
     let payId = null
     let payContact = null
     if (!captured) {
-      const recent = await recentCapturedPaymentForPhone(phone)
-      if (recent) { captured = true; payId = recent.paymentId; payContact = recent.contact }
+      // Hosted-link reconcile: only a payment made during THIS attempt
+      // (created at/after `since`) and at least the expected price counts.
+      // Without `since` we skip this fallback entirely rather than risk
+      // matching a stale payment.
+      if (since) {
+        const recent = await recentCapturedPaymentForPhone(phone, {
+          sinceEpoch: since,
+          minAmountPaise: config.razorpay.pricePaise,
+        })
+        if (recent) { captured = true; payId = recent.paymentId; payContact = recent.contact }
+      }
     }
     if (captured) {
       const r = await confirmPaidLead(phone, null, payId, payContact)
