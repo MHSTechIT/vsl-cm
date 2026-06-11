@@ -102,6 +102,17 @@
 }
 .adm-chip svg { width: 14px; height: 14px; }
 
+.adm-text-input {
+  width: 100%; font: inherit; font-weight: 500;
+  padding: 16px 18px; margin-bottom: 14px;
+  border: 1px solid var(--crm-line); border-radius: 14px;
+  background: var(--crm-surface); color: var(--crm-deep);
+}
+.adm-text-input::placeholder { color: var(--crm-muted); }
+.adm-text-input:focus {
+  outline: none; border-color: var(--crm-primary);
+  box-shadow: 0 0 0 3px rgba(91, 33, 182, 0.1); background: #fff;
+}
 .adm-pass { position: relative; margin-bottom: 18px; }
 .adm-pass input {
   width: 100%;
@@ -176,6 +187,7 @@
   font-weight: 700;
   color: var(--crm-label);
   text-decoration: none;
+  background: none; border: none; padding: 0; font-family: inherit; cursor: pointer;
 }
 .adm-back:hover { color: var(--crm-primary); }
 
@@ -297,6 +309,8 @@
   color: var(--crm-primary);
 }
 .adm-btn-ghost:hover { background: var(--crm-surface); }
+.adm-btn-danger { background: var(--crm-red); color: #fff; box-shadow: 0 4px 20px rgba(220, 38, 38, 0.3); }
+.adm-btn-danger:hover { transform: translateY(-2px); box-shadow: 0 8px 26px rgba(220, 38, 38, 0.35); }
 
 /* ---------- stat cards ---------- */
 .adm-cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 6px; }
@@ -483,6 +497,88 @@
 .adm-dialog-actions { display: flex; gap: 10px; }
 .adm-dialog-actions .adm-btn { flex: 1; }
 
+/* health-check form modal */
+.adm-dialog--wide { max-width: 680px; text-align: left; }
+.hc-modal {
+  padding: 0; overflow: hidden;
+  /* solid white — the translucent glass card picked up a grey cast from the
+     dimmed page behind it */
+  background: #fff;
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+.hc-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 16px 22px;
+  background: var(--crm-grad); color: #fff;
+}
+.hc-eyebrow {
+  display: block; font-size: 0.62rem; font-weight: 800;
+  letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.85;
+}
+.hc-head strong { font-size: 1.05rem; font-weight: 800; }
+.hc-close {
+  border: none; background: rgba(255, 255, 255, 0.18); color: #fff;
+  width: 30px; height: 30px; border-radius: 50%; font-size: 1.1rem; line-height: 1;
+  cursor: pointer; flex: 0 0 30px;
+}
+.hc-close:hover { background: rgba(255, 255, 255, 0.32); }
+.hc-body { padding: 18px 22px 22px; overflow-y: auto; max-height: calc(88vh - 70px); }
+
+/* read-only snapshot of the lead's full row */
+.hc-details {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;
+  margin-bottom: 16px; padding: 14px 16px;
+  background: var(--crm-surface); border: 1px solid var(--crm-line); border-radius: 14px;
+}
+.hc-details > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.hc-details em {
+  font-style: normal; font-size: 0.58rem; font-weight: 800;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--crm-muted);
+}
+.hc-details span {
+  font-size: 0.8rem; font-weight: 700; color: var(--crm-deep);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.hc-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 6px; }
+.hc-form label, .hc-form .hc-field {
+  display: flex; flex-direction: column; gap: 5px;
+  font-size: 0.7rem; font-weight: 800; color: var(--crm-label);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.hc-form input, .hc-form select, .hc-form textarea {
+  font-family: inherit; font-size: 0.88rem; font-weight: 500;
+  text-transform: none; letter-spacing: 0; text-align: left;
+  padding: 11px 14px; border: 1.5px solid rgba(91, 33, 182, 0.16); border-radius: 12px;
+  background: #fff; color: var(--crm-deep);
+  margin: 0; width: 100%;
+}
+.hc-form input:focus, .hc-form select:focus, .hc-form textarea:focus {
+  outline: none; border-color: var(--crm-primary); box-shadow: 0 0 0 3px rgba(91,33,182,0.1);
+}
+.hc-form input[readonly] { background: var(--crm-surface); color: var(--crm-muted-strong); }
+.hc-form textarea { resize: vertical; min-height: 64px; }
+/* on-theme dropdowns inside the form (the shared .dd component) */
+.hc-form .dd { width: 100%; }
+.hc-form .dd-btn {
+  width: 100%; min-width: 0;
+  text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 0.88rem;
+  padding: 11px 14px; border: 1.5px solid rgba(91, 33, 182, 0.16); border-radius: 12px;
+  background: #fff;
+}
+.hc-form .dd-btn:hover { border-color: var(--crm-primary); }
+.hc-form .dd-menu { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.hc-full { grid-column: 1 / -1; }
+.hc-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
+.hc-edit-btn {
+  border: none; background: var(--crm-surface-strong); color: var(--crm-primary);
+  width: 30px; height: 30px; border-radius: 8px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.hc-edit-btn svg { width: 15px; height: 15px; }
+.hc-edit-btn:hover { background: var(--crm-primary); color: #fff; }
+@media (max-width: 600px) { .hc-form { grid-template-columns: 1fr; } }
+
 /* ---------- table ---------- */
 .adm-table-wrap {
   overflow-x: auto;
@@ -569,6 +665,13 @@
   background: var(--crm-grad); transition: width 0.15s ease;
 }
 
+.up-vimeo {
+  display: flex; flex-direction: column; gap: 7px;
+  background: var(--crm-surface); border: 1px solid var(--crm-line); border-radius: 14px;
+  padding: 12px 16px;
+}
+.up-vimeo .reg-input { font-family: inherit; font-size: 0.85rem; }
+.up-vimeo-hint { font-size: 0.72rem; color: var(--crm-muted-strong); }
 .up-reveal {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   background: var(--crm-surface); border: 1px solid var(--crm-line); border-radius: 14px;
@@ -612,6 +715,14 @@
 }
 .tm-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .tm-meta .adm-strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usr-actions { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+
+/* dialog used as a form (edit user) — left-aligned, roomier */
+.adm-dialog--form { max-width: 420px; text-align: left; }
+.adm-dialog--form h3 { text-align: left; }
+.adm-dialog--form .adm-dialog-sub { text-align: left; }
+.adm-dialog--form .tm-form { margin-top: 10px; }
+.adm-dialog--form .adm-dialog-actions { margin-top: 4px; }
 .tm-stat { font-size: 0.72rem; font-weight: 600; color: var(--crm-muted-strong); font-family: ui-monospace, monospace; }
 .tm-form { display: flex; flex-direction: column; gap: 10px; }
 .tm-form .reg-input { margin-bottom: 0; font-size: 0.85rem; font-family: inherit; }

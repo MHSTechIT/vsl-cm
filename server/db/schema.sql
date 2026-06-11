@@ -86,7 +86,8 @@ ALTER TABLE leads ADD COLUMN IF NOT EXISTS payment_phone TEXT;        -- contact
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS payment_status TEXT;       -- 'success' | 'failed' | null
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS wa_payment TEXT;           -- payment WhatsApp: 'success' | 'failed' | null
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS wa_1h_sent BOOLEAN NOT NULL DEFAULT false; -- 1-hour-before reminder fired
-ALTER TABLE leads ADD COLUMN IF NOT EXISTS hc_status TEXT;            -- health-check status (logic TBD)
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS hc_status TEXT;            -- health-check status ('done' once the HC form is filled)
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS hc_data JSONB;             -- health-check form (sugar/age/gender/detox/etc.)
 
 -- WATI WhatsApp inbox — every inbound/outbound message, for the chat page.
 CREATE TABLE IF NOT EXISTS wa_messages (

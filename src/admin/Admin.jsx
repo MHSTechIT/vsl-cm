@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { adminApi, getToken, setToken, clearToken } from './adminApi.js'
+import { adminApi, getToken, setToken, clearToken, getRole, setRole } from './adminApi.js'
 import './admin.css'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
@@ -149,49 +149,72 @@ function DatePicker({ value, onChange }) {
 
 // ---------- Login ----------
 function Login({ onIn }) {
-  const [tok, setTok] = useState('')
+  const [mode, setMode] = useState('staff') // 'staff' (phone+password) | 'admin' (password)
+  const [phone, setPhone] = useState('')
+  const [pw, setPw] = useState('')
   const [show, setShow] = useState(false)
   const [err, setErr] = useState('')
-  const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
+
   async function submit(e) {
     e.preventDefault()
     setErr('')
-    setNote('')
     setBusy(true)
-    setToken(tok.trim())
     try {
-      await adminApi.stats()
-      onIn()
+      if (mode === 'admin') {
+        setToken(pw.trim())
+        const me = await adminApi.me()
+        setRole(me.role)
+        onIn(me.role)
+      } else {
+        const r = await adminApi.login(phone.replace(/\D/g, ''), pw)
+        setToken(r.token)
+        setRole(r.role)
+        onIn(r.role)
+      }
     } catch {
-      setErr('Wrong password. Please try again.')
-    } finally {
+      setErr(mode === 'admin' ? 'Wrong password. Please try again.' : 'Invalid phone or password.')
       setBusy(false)
     }
   }
+
+  const switchMode = (m) => { setMode(m); setErr(''); setPw(''); setPhone('') }
+
   return (
     <div className="adm-login-wrap">
       <img className="adm-logo" src="/favicon.png" alt="My Health School" />
       <form className="adm-login" onSubmit={submit}>
         <div className="adm-login-head">
-          <h1>Super Admin Sign In</h1>
+          <h1>{mode === 'admin' ? 'Super Admin Sign In' : 'Sign in'}</h1>
           <span className="adm-chip">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
               strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M12 3l7 2.5V11c0 4.4-3 8.4-7 9.5-4-1.1-7-5.1-7-9.5V5.5L12 3z" />
             </svg>
-            ADMIN
+            {mode === 'admin' ? 'ADMIN' : 'STAFF'}
           </span>
         </div>
+
+        {mode === 'staff' && (
+          <input
+            className="adm-text-input"
+            type="tel"
+            inputMode="numeric"
+            placeholder="Phone number"
+            autoFocus
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+          />
+        )}
 
         <div className="adm-pass">
           <input
             type={show ? 'text' : 'password'}
             placeholder="Password"
-            autoFocus
+            autoFocus={mode === 'admin'}
             autoComplete="current-password"
-            value={tok}
-            onChange={(e) => setTok(e.target.value)}
+            value={pw}
+            onChange={(e) => setPw(e.target.value)}
           />
           <button
             type="button"
@@ -209,21 +232,18 @@ function Login({ onIn }) {
         </div>
 
         {err && <p className="adm-err">{err}</p>}
-        {note && <p className="adm-note">{note}</p>}
 
         <button type="submit" className="adm-signin" disabled={busy}>
           {busy ? 'Signing in…' : 'Sign In →'}
         </button>
 
         <div className="adm-login-foot">
-          <button
-            type="button"
-            className="adm-forgot"
-            onClick={() => setNote('Contact the site owner to reset the admin password.')}
-          >
-            Forgot password?
-          </button>
-          <a className="adm-back" href="/">← Back to user login</a>
+          {mode === 'admin' ? (
+            <button type="button" className="adm-back" onClick={() => switchMode('staff')}>← Staff login</button>
+          ) : (
+            <button type="button" className="adm-forgot" onClick={() => switchMode('admin')}>Admin login</button>
+          )}
+          <a className="adm-back" href="/">← Back to site</a>
         </div>
       </form>
     </div>
@@ -347,11 +367,43 @@ function FunnelPie({ stages }) {
   )
 }
 
+// ---------- HC status ----------
+// Completed  — every HC field filled
+// Pending    — form partially filled and submitted
+// Overdue    — the booked slot has finished but the form isn't completed
+// Not yet started — nothing filled yet
+const HC_FIELDS = ['sugar_level', 'age', 'gender', 'l1_detox', 'professional', 'location', 'other_issues']
+function hcStatusOf(r) {
+  const hc = r.hc_data || null
+  const filled = hc ? HC_FIELDS.filter((k) => String(hc[k] || '').trim()).length : 0
+  if (filled === HC_FIELDS.length) return { label: 'Completed', c: 'green' }
+
+  // has the booked slot already ended?
+  let overdue = false
+  if (r.slot_date && r.slot_time) {
+    const end = String(r.slot_time).split('-')[1]?.trim() // e.g. "5.30pm"
+    const m = end?.match(/(\d{1,2})\.(\d{2})\s*(am|pm)/i)
+    if (m) {
+      let h = Number(m[1])
+      const min = Number(m[2])
+      const pm = /pm/i.test(m[3])
+      if (pm && h !== 12) h += 12
+      if (!pm && h === 12) h = 0
+      const t = Date.parse(`${r.slot_date}T${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}:00+05:30`)
+      if (!Number.isNaN(t) && Date.now() > t) overdue = true
+    }
+  }
+  if (overdue) return { label: 'Overdue', c: 'red' }
+  if (filled > 0) return { label: 'Pending', c: 'amber' }
+  return { label: 'Not yet started', c: 'grey' }
+}
+
 // ---------- Leads ----------
 function Leads() {
   const [rows, setRows] = useState([])
   const [filter, setFilter] = useState('all')
   const [q, setQ] = useState('')
+  const [hcEdit, setHcEdit] = useState(null) // the lead row being HC-edited
   const load = useCallback(() => adminApi.leads().then(setRows).catch(() => {}), [])
   useEffect(() => { load() }, [load])
 
@@ -375,7 +427,7 @@ function Leads() {
       r.wa_1h_sent ? 'yes' : 'no',
       r.paid_at ? r.paid_at.slice(0, 19).replace('T', ' ') : '',
       r.payment_status || (r.paid ? 'success' : ''),
-      r.hc_status || '',
+      hcStatusOf(r).label,
     ])
     const csv = [head, ...lines].map((row) => row.map((c) => `"${String(c ?? '')}"`).join(',')).join('\n')
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
@@ -420,7 +472,7 @@ function Leads() {
             <tr>
               <th>Name</th><th>Phone</th><th>Pay phone</th><th>Watch</th><th>Form 2</th>
               <th>Slot date &amp; time</th><th>WA payment</th><th>WA 1-hr</th>
-              <th>Registered at</th><th>Payment status</th><th>HC status</th>
+              <th>Registered at</th><th>Payment status</th><th>HC status</th><th>Edit</th>
             </tr>
           </thead>
           <tbody>
@@ -446,18 +498,144 @@ function Leads() {
                     : payStatus === 'failed' ? <Pill c="red">Failed</Pill>
                     : <span className="adm-dash">—</span>}
                 </td>
-                <td>{r.hc_status || <span className="adm-dash">—</span>}</td>
+                <td>{(() => { const h = hcStatusOf(r); return <Pill c={h.c}>{h.label}</Pill> })()}</td>
+                <td>
+                  <button className="hc-edit-btn" title="Edit health check" onClick={() => setHcEdit(r)}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                    </svg>
+                  </button>
+                </td>
               </tr>
               )
             })}
-            {filtered.length === 0 && <tr><td colSpan="11" className="adm-empty">No leads yet.</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan="12" className="adm-empty">No leads yet.</td></tr>}
           </tbody>
         </table>
       </div>
+
+      {hcEdit && (
+        <HcModal
+          lead={hcEdit}
+          onClose={() => setHcEdit(null)}
+          onSaved={() => { setHcEdit(null); load() }}
+        />
+      )}
     </section>
   )
 }
 const Pill = ({ c, children }) => <span className={`pill pill-${c}`}>{children}</span>
+
+// ---------- Health-check (HC) form modal ----------
+function HcModal({ lead, onClose, onSaved }) {
+  const hc = lead.hc_data || {}
+  const [f, setF] = useState({
+    name: lead.name || '',
+    sugar_level: hc.sugar_level || '',
+    age: hc.age || '',
+    gender: hc.gender || '',
+    l1_detox: hc.l1_detox || '',
+    professional: hc.professional || '',
+    location: hc.location || '',
+    other_issues: hc.other_issues || '',
+  })
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }))
+
+  async function submit(e) {
+    e.preventDefault()
+    setBusy(true); setErr('')
+    try {
+      await adminApi.saveHc(lead.phone, f)
+      onSaved()
+    } catch (e2) { setErr(e2.message); setBusy(false) }
+  }
+
+  const payStatus = lead.payment_status || (lead.paid ? 'success' : null)
+  const details = [
+    ['Phone', lead.phone],
+    ['Pay phone', lead.payment_phone || '—'],
+    ['Watch %', `${lead.watch_percent ?? 0}%`],
+    ['Form 2', lead.form2_submitted ? 'Yes' : '—'],
+    ['Slot', lead.slot_date ? `${fmtDate(lead.slot_date)} · ${lead.slot_time}` : '—'],
+    ['WA payment', lead.wa_payment || '—'],
+    ['WA 1-hr', lead.wa_1h_sent ? 'Yes' : 'No'],
+    ['Registered at', lead.paid_at ? fmtDateTime(lead.paid_at) : '—'],
+    ['Payment status', payStatus || '—'],
+    ['HC status', hcStatusOf(lead).label],
+  ]
+
+  return (
+    <div className="adm-overlay" onClick={onClose}>
+      <div className="adm-dialog adm-dialog--wide hc-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="hc-head">
+          <div>
+            <span className="hc-eyebrow">Health check</span>
+            <strong>{lead.name || lead.phone}</strong>
+          </div>
+          <button type="button" className="hc-close" onClick={onClose} aria-label="Close">×</button>
+        </div>
+
+        <div className="hc-body">
+          <div className="hc-details">
+            {details.map(([k, v]) => (
+              <div key={k}>
+                <em>{k}</em>
+                <span>{v}</span>
+              </div>
+            ))}
+          </div>
+
+          <form className="hc-form" onSubmit={submit}>
+          <label>Name<input value={f.name} onChange={set('name')} /></label>
+          <label>Phone number<input value={lead.phone} readOnly /></label>
+          <label>Sugar level<input value={f.sugar_level} onChange={set('sugar_level')} placeholder="e.g. 250+" /></label>
+          <label>Age<input value={f.age} onChange={set('age')} inputMode="numeric" /></label>
+          <div className="hc-field">
+            <span>Gender</span>
+            <Dropdown
+              value={f.gender}
+              onChange={(v) => setF((s) => ({ ...s, gender: v }))}
+              options={[
+                { value: '', label: '—' },
+                { value: 'Male', label: 'Male' },
+                { value: 'Female', label: 'Female' },
+                { value: 'Other', label: 'Other' },
+              ]}
+            />
+          </div>
+          <div className="hc-field">
+            <span>L1 detox joined?</span>
+            <Dropdown
+              value={f.l1_detox}
+              onChange={(v) => setF((s) => ({ ...s, l1_detox: v }))}
+              options={[
+                { value: '', label: '—' },
+                { value: 'Joined', label: 'Joined' },
+                { value: 'Not joined', label: 'Not joined' },
+              ]}
+            />
+          </div>
+          <label>Professional<input value={f.professional} onChange={set('professional')} /></label>
+          <label>Location<input value={f.location} onChange={set('location')} /></label>
+          <label className="hc-full">Any other health issues
+            <textarea value={f.other_issues} onChange={set('other_issues')} rows={3} />
+          </label>
+          {err && <p className="reg-error hc-full">{err}</p>}
+          <div className="hc-actions hc-full">
+            <button type="button" className="adm-btn adm-btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="submit" className="adm-btn adm-btn-primary" disabled={busy}>
+              {busy ? 'Saving…' : 'Submit'}
+            </button>
+          </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // ---------- Slots ----------
 const fmtDot = (iso) => {
@@ -691,6 +869,7 @@ function UploadTileProgress({ p }) {
 function Upload() {
   const [cfg, setCfg] = useState(null)
   const [reveal, setReveal] = useState('15:00')
+  const [vimeo, setVimeo] = useState('')
   const [status, setStatus] = useState('')   // timing save
   const [vProg, setVProg] = useState(null)   // null = idle, else 0..100
   const [tProg, setTProg] = useState(null)
@@ -700,7 +879,11 @@ function Upload() {
     () =>
       adminApi
         .getConfig()
-        .then((c) => { setCfg(c); setReveal(secsToMMSS(c.revealSeconds ?? 900)) })
+        .then((c) => {
+          setCfg(c)
+          setReveal(secsToMMSS(c.revealSeconds ?? 900))
+          setVimeo(c.vimeoId ? `https://vimeo.com/${c.vimeoId}` : '')
+        })
         .catch(() => {}),
     [],
   )
@@ -728,8 +911,10 @@ function Upload() {
     try {
       const fd = new FormData()
       fd.append('revealSeconds', String(mmssToSecs(reveal)))
+      fd.append('vimeoUrl', vimeo.trim())
       await adminApi.saveConfig(fd)
       setStatus('saved')
+      load()
     } catch (e) { setStatus(e.message) }
   }
 
@@ -779,6 +964,20 @@ function Upload() {
           </div>
 
           {err && <p className="reg-error" style={{ textAlign: 'center' }}>{err}</p>}
+
+          {/* Vimeo link — when set, the page plays from Vimeo (off the database) */}
+          <div className="up-vimeo">
+            <span className="up-reveal-label">Vimeo video link</span>
+            <input
+              className="reg-input"
+              value={vimeo}
+              onChange={(e) => setVimeo(e.target.value)}
+              placeholder="https://vimeo.com/123456789  (leave blank to use the uploaded file)"
+            />
+            <span className="up-vimeo-hint">
+              When set, the landing page streams from Vimeo instead of the database — recommended.
+            </span>
+          </div>
 
           {/* booking-reveal time */}
           <div className="up-reveal">
@@ -915,6 +1114,9 @@ function Users() {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null) // { kind, text }
 
+  const [editUser, setEditUser] = useState(null) // account being edited
+  const [delUser, setDelUser] = useState(null)   // account pending delete confirm
+
   const load = useCallback(() => adminApi.users().then(setList).catch(() => {}), [])
   useEffect(() => { load() }, [load])
 
@@ -935,9 +1137,11 @@ function Users() {
       setMsg({ kind: 'err', text: e2.message })
     } finally { setBusy(false) }
   }
-  async function del(id, n) {
-    if (!confirm(`Delete the account for ${n}?`)) return
-    await adminApi.deleteUser(id); load()
+  async function confirmDelete() {
+    if (!delUser) return
+    await adminApi.deleteUser(delUser.id)
+    setDelUser(null)
+    load()
   }
 
   return (
@@ -988,14 +1192,107 @@ function Users() {
                     <span className="adm-strong">{u.name}</span>
                     <span className="tm-stat">{u.phone}</span>
                   </div>
-                  <button className="adm-link" onClick={() => del(u.id, u.name)}>delete</button>
+                  <div className="usr-actions">
+                    <button className="hc-edit-btn" title="Edit account" onClick={() => setEditUser(u)}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                      </svg>
+                    </button>
+                    <button className="adm-link" onClick={() => setDelUser(u)}>delete</button>
+                  </div>
                 </div>
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {editUser && (
+        <UserEditModal
+          user={editUser}
+          onClose={() => setEditUser(null)}
+          onSaved={() => { setEditUser(null); load() }}
+        />
+      )}
+
+      {delUser && (
+        <div className="adm-overlay" onClick={() => setDelUser(null)}>
+          <div className="adm-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Delete account?</h3>
+            <p className="adm-dialog-sub">
+              This permanently deletes the account for <b>{delUser.name}</b> ({delUser.phone}).
+            </p>
+            <div className="adm-dialog-actions">
+              <button className="adm-btn adm-btn-ghost" onClick={() => setDelUser(null)}>Cancel</button>
+              <button className="adm-btn adm-btn-danger" onClick={confirmDelete}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
+  )
+}
+
+// ---------- Edit-user modal ----------
+function UserEditModal({ user, onClose, onSaved }) {
+  const [name, setName] = useState(user.name || '')
+  const [phone, setPhone] = useState(user.phone || '')
+  const [pw, setPw] = useState('')
+  const [pw2, setPw2] = useState('')
+  const [show, setShow] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  async function save(e) {
+    e.preventDefault()
+    setErr('')
+    if (!name.trim()) return setErr('Enter a name.')
+    if (phone.replace(/\D/g, '').length < 8) return setErr('Enter a valid phone number.')
+    if (pw && pw.length < 4) return setErr('Password must be at least 4 characters.')
+    if (pw && pw !== pw2) return setErr('Passwords do not match.')
+    setBusy(true)
+    try {
+      await adminApi.updateUser(user.id, name.trim(), phone, pw)
+      onSaved()
+    } catch (e2) { setErr(e2.message); setBusy(false) }
+  }
+
+  return (
+    <div className="adm-overlay" onClick={onClose}>
+      <div className="adm-dialog adm-dialog--form" onClick={(e) => e.stopPropagation()}>
+        <h3>Edit account</h3>
+        <p className="adm-dialog-sub">{user.name}</p>
+        <form className="tm-form" onSubmit={save}>
+          <input className="reg-input" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="reg-input" type="tel" inputMode="numeric" placeholder="Phone number"
+            value={phone} onChange={(e) => setPhone(e.target.value)} />
+          <div className="adm-pass">
+            <input className="reg-input" type={show ? 'text' : 'password'}
+              placeholder="New password (leave blank to keep current)"
+              value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" />
+            <button type="button" className="adm-eye" onClick={() => setShow((v) => !v)} aria-label="Toggle password">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+                strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" /><circle cx="12" cy="12" r="3" />
+                {show && <line x1="4" y1="4" x2="20" y2="20" />}
+              </svg>
+            </button>
+          </div>
+          {pw && (
+            <input className="reg-input" type={show ? 'text' : 'password'} placeholder="Re-enter new password"
+              value={pw2} onChange={(e) => setPw2(e.target.value)} autoComplete="new-password" />
+          )}
+          {err && <p className="reg-error" style={{ margin: 0 }}>{err}</p>}
+          <div className="adm-dialog-actions">
+            <button type="button" className="adm-btn adm-btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="submit" className="adm-btn adm-btn-primary" disabled={busy}>
+              {busy ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   )
 }
 
@@ -1208,26 +1505,43 @@ function Settings() {
 }
 
 // ---------- Shell ----------
+const ADMIN_NAV = [
+  { id: 'dashboard', label: 'Overview' },
+  { id: 'leads', label: 'Leads' },
+  { id: 'users', label: 'Users' },
+  { id: 'wati', label: 'WATI' },
+  { id: 'slots', label: 'Slots' },
+  { id: 'upload', label: 'Upload' },
+  { id: 'settings', label: 'Settings' },
+]
+const STAFF_NAV = [
+  { id: 'leads', label: 'Leads' },
+  { id: 'wati', label: 'WATI' },
+]
+
 export default function Admin() {
-  const [authed, setAuthed] = useState(Boolean(getToken()))
-  const [tab, setTab] = useState('dashboard')
+  const [authed, setAuthed] = useState(false)
+  const [role, setRoleState] = useState(getRole())
+  const [tab, setTab] = useState('leads')
+
+  // start tab on the right default for the role
+  const enter = (r) => {
+    setRoleState(r)
+    setTab(r === 'admin' ? 'dashboard' : 'leads')
+    setAuthed(true)
+  }
+  const signOut = () => { clearToken(); setAuthed(false); setRoleState('') }
 
   useEffect(() => {
     if (!getToken()) return
-    adminApi.stats().then(() => setAuthed(true)).catch(() => { clearToken(); setAuthed(false) })
+    adminApi.me()
+      .then((me) => { setRole(me.role); enter(me.role) })
+      .catch(() => { clearToken(); setAuthed(false) })
   }, [])
 
-  if (!authed) return <Login onIn={() => setAuthed(true)} />
+  if (!authed) return <Login onIn={enter} />
 
-  const nav = [
-    { id: 'dashboard', label: 'Overview' },
-    { id: 'leads', label: 'Leads' },
-    { id: 'users', label: 'Users' },
-    { id: 'wati', label: 'WATI' },
-    { id: 'slots', label: 'Slots' },
-    { id: 'upload', label: 'Upload' },
-    { id: 'settings', label: 'Settings' },
-  ]
+  const nav = role === 'admin' ? ADMIN_NAV : STAFF_NAV
 
   return (
     <div className="adm-shell">
@@ -1236,7 +1550,7 @@ export default function Admin() {
           <img src="/favicon.png" alt="" />
           <div>
             <strong>My Health School</strong>
-            <span>Admin panel</span>
+            <span>{role === 'admin' ? 'Admin panel' : 'Staff'}</span>
           </div>
         </div>
 
@@ -1249,19 +1563,19 @@ export default function Admin() {
           ))}
         </nav>
 
-        <button className="adm-signout" onClick={() => { clearToken(); setAuthed(false) }}>
+        <button className="adm-signout" onClick={signOut}>
           Sign out
         </button>
       </aside>
 
       <main className="adm-content">
-        {tab === 'dashboard' && <Dashboard />}
+        {tab === 'dashboard' && role === 'admin' && <Dashboard />}
         {tab === 'leads' && <Leads />}
-        {tab === 'users' && <Users />}
+        {tab === 'users' && role === 'admin' && <Users />}
         {tab === 'wati' && <WatiChat />}
-        {tab === 'slots' && <Slots />}
-        {tab === 'upload' && <Upload />}
-        {tab === 'settings' && <Settings />}
+        {tab === 'slots' && role === 'admin' && <Slots />}
+        {tab === 'upload' && role === 'admin' && <Upload />}
+        {tab === 'settings' && role === 'admin' && <Settings />}
       </main>
     </div>
   )

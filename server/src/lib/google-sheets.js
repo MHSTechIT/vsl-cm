@@ -50,6 +50,29 @@ const HEADER = [
   'WA payment', 'WA 1-hr', 'Registered at (paid)', 'Payment status', 'HC status',
 ]
 const ts = (v) => (v ? String(v).slice(0, 19).replace('T', ' ') : '')
+
+// Same HC-status logic as the admin Leads table (keep the two in sync).
+const HC_FIELDS = ['sugar_level', 'age', 'gender', 'l1_detox', 'professional', 'location', 'other_issues']
+function hcLabel(l) {
+  const hc = l.hc_data || null
+  const filled = hc ? HC_FIELDS.filter((k) => String(hc[k] || '').trim()).length : 0
+  if (filled === HC_FIELDS.length) return 'Completed'
+  if (l.slot_date && l.slot_time) {
+    const end = String(l.slot_time).split('-')[1]?.trim()
+    const m = end?.match(/(\d{1,2})\.(\d{2})\s*(am|pm)/i)
+    if (m) {
+      let h = Number(m[1])
+      const min = Number(m[2])
+      const pm = /pm/i.test(m[3])
+      if (pm && h !== 12) h += 12
+      if (!pm && h === 12) h = 0
+      const t = Date.parse(`${String(l.slot_date).slice(0, 10)}T${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}:00+05:30`)
+      if (!Number.isNaN(t) && Date.now() > t) return 'Overdue'
+    }
+  }
+  return filled > 0 ? 'Pending' : 'Not yet started'
+}
+
 function rowFor(l) {
   return [
     l.name || '',
@@ -62,7 +85,7 @@ function rowFor(l) {
     l.wa_1h_sent ? 'yes' : 'no',
     ts(l.paid_at),
     l.payment_status || (l.paid ? 'success' : ''),
-    l.hc_status || '',
+    hcLabel(l),
   ]
 }
 
@@ -88,7 +111,7 @@ export async function syncLeadsToSheet() {
   const token = await accessToken()
   const { rows } = await query(
     `SELECT phone, name, watch_percent, form2_submitted, slot_date, slot_time,
-            paid, paid_at, payment_phone, payment_status, wa_payment, wa_1h_sent, hc_status
+            paid, paid_at, payment_phone, payment_status, wa_payment, wa_1h_sent, hc_status, hc_data
        FROM leads ORDER BY registered_at DESC`,
   )
   const values = [HEADER, ...rows.map(rowFor)]

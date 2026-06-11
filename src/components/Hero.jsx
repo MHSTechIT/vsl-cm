@@ -21,7 +21,8 @@ export default function Hero() {
         <span className="hero-badge">{hero.badge}</span>
 
         <h1 className="hero-headline">
-          {hero.headline} <span className="hl">{hero.headlineAccent}</span>
+          <span className="hl-shine">{hero.headline}</span>{' '}
+          <span className="hl">{hero.headlineAccent}</span>
         </h1>
 
         <p className="hero-subhead">{hero.subhead}</p>

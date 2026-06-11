@@ -68,12 +68,6 @@ export async function sendSessionMessage(phone, text) {
   return { sent: true }
 }
 
-// Convenience wrappers — send the template as-is, no variables.
-export const watiPaymentSuccess = (phone) =>
-  sendTemplate(phone, config.wati.templates.paymentSuccess)
-
-export const watiPaymentFailed = (phone) =>
-  sendTemplate(phone, config.wati.templates.paymentFailed)
-
-export const watiOneHour = (phone) =>
-  sendTemplate(phone, config.wati.templates.oneHour)
+// Payment-success template ("vsl"): {{1}} = booking date, {{2}} = booking time.
+export const watiPaymentSuccess = (phone, { date, time } = {}) =>
+  sendTemplate(phone, config.wati.templates.paymentSuccess, [date, time])

@@ -126,6 +126,40 @@ p:last-child { margin-bottom: 0; }
   letter-spacing: -0.01em;
   text-transform: capitalize;   /* capitalise the first letter of each word */
 }
+/* looping text-shine on the dark indigo-purple headline. A thin bright-purple
+   band sweeps right→left across the letters once per 8s loop (held off-screen
+   for the first half so it flashes, not shimmers continuously). */
+.hl-shine {
+  background-image: linear-gradient(
+    105deg,
+    #2d0a6e 0%,
+    #2d0a6e 47%,
+    #7c3aed 47%,
+    #5b21b6 50%,
+    #7c3aed 53%,
+    #2d0a6e 53%,
+    #2d0a6e 100%
+  );
+  background-size: 300% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: hl-shine 8s linear infinite;
+}
+@keyframes hl-shine {
+  0%, 50% { background-position: 100% 0; }  /* hold: band off-screen */
+  100%    { background-position: 0% 0; }    /* sweep the band across */
+}
+@media (prefers-reduced-motion: reduce) {
+  .hl-shine {
+    animation: none;
+    color: #2d0a6e;
+    -webkit-text-fill-color: #2d0a6e;
+  }
+}
+
 /* highlighted phrase with a hand-drawn underline (in-palette accent) */
 .hero-headline .hl {
   position: relative;
@@ -220,17 +254,17 @@ p:last-child { margin-bottom: 0; }
   width: 100%;
   max-width: 360px;
   margin: 0 auto;
-  min-height: 54px;
-  padding: 15px 24px;
+  min-height: 46px;
+  padding: 12px 22px;
   background: linear-gradient(135deg, var(--accent-light), var(--accent-dark));
   color: #ffffff;
   font-family: inherit;
-  font-size: 1.08rem;
+  font-size: 0.95rem;
   font-weight: 700;
   text-align: center;
   text-decoration: none;
   border: none;
-  border-radius: 40px;
+  border-radius: 12px;
   cursor: pointer;
   line-height: 1.3;
   box-shadow: 0 12px 26px rgba(91, 33, 182, 0.28);
@@ -561,6 +595,48 @@ p:last-child { margin-bottom: 0; }
   background: #000;
   object-fit: cover;
 }
+/* Vimeo embed: fill the 16:9 frame, clip to the rounded corners */
+.vsl-vimeo-wrap {
+  position: absolute; inset: 0;
+  border-radius: var(--radius); overflow: hidden; background: #000;
+}
+.vsl-vimeo-wrap:fullscreen { border-radius: 0; }
+.vsl-vimeo { overflow: hidden; }
+.vsl-vimeo iframe,
+.vsl-vimeo > div {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  padding: 0 !important;
+}
+/* custom minimal control bar — play / mute / fullscreen only */
+.vfx-bar {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px;
+  background: linear-gradient(to top, rgba(0,0,0,0.55), rgba(0,0,0,0));
+}
+.vfx-spacer { flex: 1; }
+.vfx-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; border: none; border-radius: 10px;
+  background: rgba(255,255,255,0.12); color: #fff; cursor: pointer;
+  transition: background 0.12s ease;
+}
+.vfx-btn:hover { background: rgba(255,255,255,0.26); }
+.vfx-btn svg { width: 22px; height: 22px; }
+/* in-player booking button — appears bottom-right in fullscreen once unlocked */
+.vfx-book {
+  position: absolute; right: 16px; bottom: 64px; z-index: 4;
+  padding: 12px 20px; border: none; border-radius: 12px;
+  background: linear-gradient(135deg, var(--accent-light), var(--accent-dark));
+  color: #fff; font-family: inherit; font-size: 0.95rem; font-weight: 700;
+  cursor: pointer; box-shadow: 0 8px 22px rgba(0,0,0,0.35);
+  animation: vfxBookIn 0.25s ease;
+}
+.vfx-book:hover { filter: brightness(1.06); }
+@keyframes vfxBookIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .vsl-sim { margin-top: 12px; }
 .vsl-sim-label { font-size: 0.72rem; color: var(--muted); display: block; margin-bottom: 6px; }
 .vsl-sim-btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }

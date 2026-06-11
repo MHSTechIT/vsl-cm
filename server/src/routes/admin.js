@@ -10,6 +10,7 @@ import { ah } from '../lib/ah.js'
 import { setSetting, getSettings } from '../lib/settings.js'
 import { syncLeadsToSheet, spreadsheetIdFromUrl, isConfigured as googleConfigured } from '../lib/google-sheets.js'
 import { sendSessionMessage, watiConfigured } from '../lib/wati.js'
+import { paymentContact, orderPaymentContact } from '../lib/razorpay.js'
 
 export const adminRouter = Router()
 
@@ -26,12 +27,61 @@ async function storeMedia(kind, file) {
   return rows[0].id
 }
 
-// Simple shared-token auth for the whole admin API.
+// Staff session token = "staff.<id>.<hmac>" signed with the admin token.
+function staffToken(id) {
+  const body = `staff.${id}`
+  const sig = crypto.createHmac('sha256', config.adminToken).update(body).digest('hex').slice(0, 32)
+  return `${body}.${sig}`
+}
+function verifyStaffToken(token) {
+  const m = /^staff\.(\d+)\.([a-f0-9]{32})$/.exec(token || '')
+  if (!m) return null
+  const expected = crypto.createHmac('sha256', config.adminToken).update(`staff.${m[1]}`).digest('hex').slice(0, 32)
+  return m[2] === expected ? { id: Number(m[1]) } : null
+}
+
+// Staff login (phone + password) — mounted publicly in index.js, before auth.
+export async function staffLogin(req, res) {
+  const phone = String(req.body?.phone || '').replace(/\D/g, '')
+  const password = String(req.body?.password || '')
+  if (!phone || !password) return res.status(400).json({ error: 'phone and password required' })
+  const { rows } = await query(
+    `SELECT id, name, phone, pass_salt, pass_hash FROM users WHERE phone = $1`,
+    [phone],
+  )
+  const u = rows[0]
+  if (!u) return res.status(401).json({ error: 'invalid phone or password' })
+  const hash = crypto.scryptSync(password, u.pass_salt, 64).toString('hex')
+  if (hash !== u.pass_hash) return res.status(401).json({ error: 'invalid phone or password' })
+  res.json({ token: staffToken(u.id), role: 'staff', name: u.name, phone: u.phone })
+}
+
+// Auth: super-admin shared token (full access) OR a signed staff token.
 adminRouter.use((req, res, next) => {
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
-  if (token !== config.adminToken) return res.status(401).json({ error: 'unauthorized' })
-  next()
+  if (token === config.adminToken) { req.role = 'admin'; return next() }
+  const staff = verifyStaffToken(token)
+  if (staff) { req.role = 'staff'; req.userId = staff.id; return next() }
+  return res.status(401).json({ error: 'unauthorized' })
 })
+
+// Staff are scoped to the Leads + WATI pages only.
+const STAFF_ALLOW = [/^\/me$/, /^\/leads$/, /^\/leads\/[^/]+\/hc$/, /^\/wa\//]
+adminRouter.use((req, res, next) => {
+  if (req.role !== 'staff') return next()
+  if (STAFF_ALLOW.some((rx) => rx.test(req.path))) return next()
+  return res.status(403).json({ error: 'forbidden' })
+})
+
+// Who am I — drives the shell's nav + auth check.
+adminRouter.get(
+  '/me',
+  ah(async (req, res) => {
+    if (req.role === 'admin') return res.json({ role: 'admin' })
+    const { rows } = await query(`SELECT name, phone FROM users WHERE id = $1`, [req.userId])
+    res.json({ role: 'staff', name: rows[0]?.name || '', phone: rows[0]?.phone || '' })
+  }),
+)
 
 // Dashboard: counts, funnel, watch-time breakdown.
 adminRouter.get(
@@ -58,6 +108,30 @@ adminRouter.get(
   }),
 )
 
+// Resolve missing "Pay phone" values from Razorpay (the contact the customer
+// typed during payment). Runs lazily after each Leads load, a few at a time,
+// so older payments backfill without blocking the response. Live keys only.
+async function backfillPayPhones(rows) {
+  try {
+    const missing = rows
+      .filter((r) => r.paid && !r.payment_phone && (r.rzp_payment_id || r.rzp_order_id))
+      .slice(0, 5)
+    for (const r of missing) {
+      let contact = r.rzp_payment_id ? await paymentContact(r.rzp_payment_id) : null
+      if (!contact && r.rzp_order_id) contact = await orderPaymentContact(r.rzp_order_id)
+      if (contact) {
+        await query(`UPDATE leads SET payment_phone = $2, updated_at = now() WHERE phone = $1`, [
+          r.phone,
+          String(contact).replace(/\D/g, ''),
+        ])
+      }
+    }
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[leads] pay-phone backfill:', e.message)
+  }
+}
+
 // CRM table — all leads, newest first.
 adminRouter.get(
   '/leads',
@@ -65,11 +139,13 @@ adminRouter.get(
     const { rows } = await query(
       `SELECT phone, name, registered_at, watch_percent, form2_submitted,
               slot_date, slot_time, slot_status, paid, paid_at, needs_wa,
-              payment_phone, payment_status, wa_payment, wa_1h_sent, hc_status
+              payment_phone, payment_status, wa_payment, wa_1h_sent, hc_status, hc_data,
+              rzp_payment_id, rzp_order_id
          FROM leads
         ORDER BY registered_at DESC`,
     )
     res.json(rows.map((r) => ({ ...r, slot_date: r.slot_date ? isoDate(r.slot_date) : null })))
+    backfillPayPhones(rows) // fire-and-forget — next refresh shows the numbers
   }),
 )
 
@@ -131,10 +207,69 @@ adminRouter.post(
   }),
 )
 
+adminRouter.put(
+  '/users/:id',
+  ah(async (req, res) => {
+    const id = Number(req.params.id)
+    const name = String(req.body?.name || '').trim()
+    const phone = String(req.body?.phone || '').replace(/\D/g, '')
+    const password = String(req.body?.password || '')
+    if (!name) return res.status(400).json({ error: 'name is required' })
+    if (phone.length < 8) return res.status(400).json({ error: 'a valid phone number is required' })
+    if (password && password.length < 4) {
+      return res.status(400).json({ error: 'password must be at least 4 characters' })
+    }
+    try {
+      if (password) {
+        const { salt, hash } = hashPassword(password)
+        await query(
+          `UPDATE users SET name = $2, phone = $3, pass_salt = $4, pass_hash = $5 WHERE id = $1`,
+          [id, name, phone, salt, hash],
+        )
+      } else {
+        await query(`UPDATE users SET name = $2, phone = $3 WHERE id = $1`, [id, name, phone])
+      }
+      const { rows } = await query(`SELECT id, name, phone, created_at FROM users WHERE id = $1`, [id])
+      res.json(rows[0] || { ok: true })
+    } catch (e) {
+      if (e.code === '23505') return res.status(409).json({ error: 'an account with that phone already exists' })
+      throw e
+    }
+  }),
+)
+
 adminRouter.delete(
   '/users/:id',
   ah(async (req, res) => {
     await query(`DELETE FROM users WHERE id = $1`, [Number(req.params.id)])
+    res.json({ ok: true })
+  }),
+)
+
+// Save a lead's health-check form (HC). Updates name + the JSON detail.
+adminRouter.post(
+  '/leads/:phone/hc',
+  ah(async (req, res) => {
+    const phone = String(req.params.phone).replace(/\D/g, '')
+    const b = req.body || {}
+    const name = String(b.name || '').trim()
+    const hc = {
+      sugar_level: String(b.sugar_level || ''),
+      age: String(b.age || ''),
+      gender: String(b.gender || ''),
+      l1_detox: String(b.l1_detox || ''),
+      professional: String(b.professional || ''),
+      location: String(b.location || ''),
+      app_datetime: String(b.app_datetime || ''),
+      other_issues: String(b.other_issues || ''),
+    }
+    await query(
+      `UPDATE leads
+          SET name = COALESCE(NULLIF($2, ''), name),
+              hc_data = $3::jsonb, hc_status = 'done', updated_at = now()
+        WHERE phone = $1`,
+      [phone, name, JSON.stringify(hc)],
+    )
     res.json({ ok: true })
   }),
 )
@@ -381,35 +516,61 @@ adminRouter.post(
   }),
 )
 
+// Pull the numeric id out of a Vimeo URL (or accept a bare id).
+function vimeoIdFrom(input) {
+  const s = String(input || '').trim()
+  if (!s) return ''
+  if (/^\d+$/.test(s)) return s
+  const m = s.match(/vimeo\.com\/(?:video\/)?(\d+)/)
+  return m ? m[1] : ''
+}
+
 // Landing-page config: current video + thumbnail + booking-reveal time.
 adminRouter.get(
   '/config',
   ah(async (_req, res) => {
-    const s = await getSettings(['video_id', 'thumb_id', 'reveal_seconds'])
+    const s = await getSettings(['video_id', 'thumb_id', 'reveal_seconds', 'vimeo_id'])
     res.json({
       videoId: s.video_id ? Number(s.video_id) : null,
       thumbId: s.thumb_id ? Number(s.thumb_id) : null,
       revealSeconds: s.reveal_seconds != null ? Number(s.reveal_seconds) : 900,
+      vimeoId: s.vimeo_id || '',
     })
   }),
 )
 
 // Save config — optional video/thumbnail (stored in DB) + the reveal time.
+// Replacing a video/thumbnail auto-deletes the previous one from the media
+// table, so old files never pile up in the database.
 adminRouter.post(
   '/config',
   upload.fields([{ name: 'video', maxCount: 1 }, { name: 'thumb', maxCount: 1 }]),
   ah(async (req, res) => {
+    const prev = await getSettings(['video_id', 'thumb_id'])
     if (req.files?.video?.[0]) {
       const id = await storeMedia('video', req.files.video[0])
       await setSetting('video_id', id)
+      const old = Number(prev.video_id)
+      if (old && old !== id) {
+        await query(`DELETE FROM media WHERE id = $1`, [old]).catch(() => {})
+      }
     }
     if (req.files?.thumb?.[0]) {
       const id = await storeMedia('thumb', req.files.thumb[0])
       await setSetting('thumb_id', id)
+      const old = Number(prev.thumb_id)
+      if (old && old !== id) {
+        await query(`DELETE FROM media WHERE id = $1`, [old]).catch(() => {})
+      }
     }
     if (req.body?.revealSeconds != null && req.body.revealSeconds !== '') {
       const secs = Math.max(0, Math.round(Number(req.body.revealSeconds)) || 0)
       await setSetting('reveal_seconds', secs)
+    }
+    // Vimeo link — when set, the landing page plays from Vimeo instead of the
+    // DB-stored file. Pass an empty string to clear it (back to the DB video).
+    if (req.body?.vimeoUrl != null) {
+      await setSetting('vimeo_id', vimeoIdFrom(req.body.vimeoUrl))
     }
     res.json({ ok: true })
   }),

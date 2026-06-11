@@ -35,9 +35,8 @@ export const config = {
     baseUrl: process.env.WATI_BASE_URL || '',
     webhookToken: process.env.WATI_WEBHOOK_TOKEN || '',
     templates: {
-      paymentSuccess: process.env.WATI_TPL_PAYMENT_SUCCESS || 'payment_success',
-      paymentFailed: process.env.WATI_TPL_PAYMENT_FAILED || 'payment_failed_',
-      oneHour: process.env.WATI_TPL_ONE_HOUR || 'one_hour',
+      // 'vsl' — the approved booking-confirmation template (date + time vars)
+      paymentSuccess: process.env.WATI_TPL_PAYMENT_SUCCESS || 'vsl',
     },
   },
 

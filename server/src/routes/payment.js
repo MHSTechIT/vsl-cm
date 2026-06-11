@@ -12,7 +12,7 @@ import {
 import { applySlotDrip } from '../lib/drip.js'
 import { syncLeadsToSheetSafe } from '../lib/google-sheets.js'
 import { sendWhatsApp, confirmationMessage } from '../lib/whapi.js'
-import { watiConfigured, watiPaymentSuccess, watiPaymentFailed } from '../lib/wati.js'
+import { watiConfigured, watiPaymentSuccess } from '../lib/wati.js'
 import { isoDate } from './slots.js'
 import { ah } from '../lib/ah.js'
 
@@ -98,11 +98,12 @@ async function confirmPaidLead(phone, slotId = null, paymentId = null, paymentPh
       WHERE phone = $1`,
     [phone, paymentId, payPhone],
   )
-  // payment confirmation WhatsApp — WATI template if set up, else Whapi text
+  // payment confirmation WhatsApp — WATI "vsl" template (date + time), else Whapi text
   if (watiConfigured()) {
-    watiPaymentSuccess(phone).catch((e) =>
+    const dmy = date.split('-').reverse().join('/') // YYYY-MM-DD → DD/MM/YYYY
+    watiPaymentSuccess(phone, { date: dmy, time: seat.slot_time }).catch((e) =>
       // eslint-disable-next-line no-console
-      console.error('[wati] payment_success failed:', e.message),
+      console.error('[wati] vsl (payment success) failed:', e.message),
     )
   } else {
     sendWhatsApp(phone, confirmationMessage(date, seat.slot_time), 'confirmation').catch(() => {})
@@ -180,21 +181,15 @@ async function handlePaymentFailed(payment) {
   const contact10 = String(payment?.contact || '').replace(/\D/g, '').slice(-10)
   const phone = notePhone || contact10
   if (phone) {
-    // record the failed attempt on the lead so the registry shows it
-    const { rows } = await query(
+    // record the failed attempt on the lead so the registry shows it.
+    // No WhatsApp is sent on failure (only payment_success is messaged).
+    await query(
       `UPDATE leads
-          SET payment_status = 'failed', wa_payment = 'failed',
+          SET payment_status = 'failed',
               payment_phone = COALESCE($2, payment_phone), updated_at = now()
-        WHERE phone = $1 AND paid = false
-        RETURNING name`,
+        WHERE phone = $1 AND paid = false`,
       [phone, payment?.contact ? contact10 : null],
     )
-    if (rows.length && watiConfigured()) {
-      watiPaymentFailed(phone).catch((e) =>
-        // eslint-disable-next-line no-console
-        console.error('[wati] payment_failed_ failed:', e.message),
-      )
-    }
   }
   // eslint-disable-next-line no-console
   console.log(`[webhook] payment.failed ${payment?.id} phone=${phone || '?'} ${payment?.error_description || ''}`)

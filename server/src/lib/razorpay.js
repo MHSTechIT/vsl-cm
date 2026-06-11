@@ -108,6 +108,33 @@ export async function recentCapturedPaymentForPhone(phone, windowMins = 120) {
   return { paymentId: match.id, amount: match.amount, contact: match.contact || null }
 }
 
+// Contact the customer typed during payment — looked up by payment id.
+// Used to backfill the admin "Pay phone" column for older payments.
+export async function paymentContact(paymentId) {
+  if (isMock() || !paymentId) return null
+  const auth = Buffer.from(`${keyId}:${keySecret}`).toString('base64')
+  const res = await fetch(`https://api.razorpay.com/v1/payments/${paymentId}`, {
+    headers: { Authorization: `Basic ${auth}` },
+  })
+  if (!res.ok) return null
+  const p = await res.json().catch(() => null)
+  return p?.contact || null
+}
+
+// Same, but via the order (when we stored the order id but not the payment id).
+export async function orderPaymentContact(orderId) {
+  if (isMock() || !orderId || String(orderId).startsWith('mock_')) return null
+  const auth = Buffer.from(`${keyId}:${keySecret}`).toString('base64')
+  const res = await fetch(`https://api.razorpay.com/v1/orders/${orderId}/payments`, {
+    headers: { Authorization: `Basic ${auth}` },
+  })
+  if (!res.ok) return null
+  const j = await res.json().catch(() => ({}))
+  const items = j.items || []
+  const p = items.find((x) => x.status === 'captured') || items[0]
+  return p?.contact || null
+}
+
 // Verify the payment signature from Razorpay checkout. Mock mode always passes.
 export function verifyPayment({ orderId, paymentId, signature }) {
   if (mode === 'mock' || !keySecret) return true

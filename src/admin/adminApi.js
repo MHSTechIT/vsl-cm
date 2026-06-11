@@ -1,9 +1,12 @@
 const BASE = import.meta.env.VITE_API_URL || ''
 const TOKEN_KEY = 'vsl_admin_token'
+const ROLE_KEY = 'vsl_admin_role'
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY) || ''
 export const setToken = (t) => localStorage.setItem(TOKEN_KEY, t)
-export const clearToken = () => localStorage.removeItem(TOKEN_KEY)
+export const getRole = () => localStorage.getItem(ROLE_KEY) || ''
+export const setRole = (r) => localStorage.setItem(ROLE_KEY, r)
+export const clearToken = () => { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(ROLE_KEY) }
 
 async function req(path, options = {}) {
   const res = await fetch(`${BASE}/api/admin${path}`, {
@@ -58,6 +61,9 @@ function postFormProgress(path, formData, onProgress) {
 }
 
 export const adminApi = {
+  login: (phone, password) =>
+    req('/login', { method: 'POST', body: JSON.stringify({ phone, password }) }),
+  me: () => req('/me'),
   stats: () => req('/stats'),
   getConfig: () => req('/config'),
   saveConfig: (formData, onProgress) => postFormProgress('/config', formData, onProgress),
@@ -84,7 +90,11 @@ export const adminApi = {
   users: () => req('/users'),
   createUser: (name, phone, password) =>
     req('/users', { method: 'POST', body: JSON.stringify({ name, phone, password }) }),
+  updateUser: (id, name, phone, password) =>
+    req(`/users/${id}`, { method: 'PUT', body: JSON.stringify({ name, phone, password }) }),
   deleteUser: (id) => req(`/users/${id}`, { method: 'DELETE' }),
+  saveHc: (phone, data) =>
+    req(`/leads/${encodeURIComponent(phone)}/hc`, { method: 'POST', body: JSON.stringify(data) }),
   waConversations: () => req('/wa/conversations'),
   waMessages: (waId) => req(`/wa/messages/${encodeURIComponent(waId)}`),
   waSend: (waId, text) => req('/wa/send', { method: 'POST', body: JSON.stringify({ waId, text }) }),

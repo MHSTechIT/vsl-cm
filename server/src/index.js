@@ -4,10 +4,9 @@ import { config } from './config.js'
 import { leadsRouter } from './routes/leads.js'
 import { slotsRouter } from './routes/slots.js'
 import { paymentRouter, razorpayWebhook } from './routes/payment.js'
-import { adminRouter } from './routes/admin.js'
+import { adminRouter, staffLogin } from './routes/admin.js'
 import { watiWebhook } from './routes/watiWebhook.js'
 import { startHoldSweeper } from './lib/holds.js'
-import { startReminderSweeper } from './lib/reminders.js'
 import { ah } from './lib/ah.js'
 import { getSettings } from './lib/settings.js'
 import { query } from './db.js'
@@ -69,8 +68,9 @@ app.get(
 app.get(
   '/api/config',
   ah(async (_req, res) => {
-    const s = await getSettings(['video_id', 'thumb_id', 'reveal_seconds'])
+    const s = await getSettings(['video_id', 'thumb_id', 'reveal_seconds', 'vimeo_id'])
     res.json({
+      vimeoId: s.vimeo_id || null,
       videoUrl: s.video_id ? `/media/${s.video_id}` : null,
       thumbUrl: s.thumb_id ? `/media/${s.thumb_id}` : null,
       revealSeconds: s.reveal_seconds != null ? Number(s.reveal_seconds) : 900,
@@ -99,6 +99,9 @@ app.get(
   }),
 )
 
+// staff login is public — must be registered before the admin auth router
+app.post('/api/admin/login', ah(staffLogin))
+
 app.use('/api/leads', leadsRouter)
 app.use('/api/slots', slotsRouter)
 app.use('/api/payment', paymentRouter)
@@ -121,5 +124,5 @@ app.listen(config.port, () => {
   // eslint-disable-next-line no-console
   console.log(`✓ API on http://localhost:${config.port}  (razorpay: ${config.razorpay.mode})`)
   startHoldSweeper()
-  startReminderSweeper()
+  // 1-hour reminder disabled — only the payment-success template is sent.
 })
