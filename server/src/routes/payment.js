@@ -10,7 +10,9 @@ import {
   recentCapturedPaymentForPhone,
 } from '../lib/razorpay.js'
 import { applySlotDrip } from '../lib/drip.js'
+import { syncLeadsToSheetSafe } from '../lib/google-sheets.js'
 import { sendWhatsApp, confirmationMessage } from '../lib/whapi.js'
+import { watiConfigured, watiPaymentSuccess, watiPaymentFailed } from '../lib/wati.js'
 import { isoDate } from './slots.js'
 import { ah } from '../lib/ah.js'
 
@@ -59,26 +61,28 @@ async function claimSeat(phone, slotId, takeAvailableIfReleased) {
 // reconciliation). Safe to call repeatedly (webhook retries): a seat is only
 // claimed while one is pending-held. A lead who already paid before can book
 // again with the same phone — their newly held seat still gets confirmed.
-async function confirmPaidLead(phone, slotId = null, paymentId = null) {
+async function confirmPaidLead(phone, slotId = null, paymentId = null, paymentPhone = null) {
   const { rows: leadRows } = await query(
-    `SELECT paid, slot_date, slot_time FROM leads WHERE phone = $1`,
+    `SELECT paid, name, slot_date, slot_time FROM leads WHERE phone = $1`,
     [phone],
   )
   if (!leadRows.length) return null
   const lead = leadRows[0]
+  const payPhone = paymentPhone ? String(paymentPhone).replace(/\D/g, '') : null
 
   // Falling back to an 'available' seat is only safe for a first payment —
   // for an already-paid lead a webhook retry would silently eat extra seats.
   const seat = await claimSeat(phone, slotId, !lead.paid)
   if (!seat) {
     if (lead.paid) {
-      // already settled — still record the payment id if we just learned it
-      if (paymentId) {
-        await query(
-          `UPDATE leads SET rzp_payment_id = COALESCE(rzp_payment_id, $2), updated_at = now() WHERE phone = $1`,
-          [phone, paymentId],
-        )
-      }
+      // already settled — still record ids if we just learned them
+      await query(
+        `UPDATE leads SET rzp_payment_id = COALESCE($2, rzp_payment_id),
+            payment_phone = COALESCE($3, payment_phone),
+            payment_status = 'success', updated_at = now()
+          WHERE phone = $1`,
+        [phone, paymentId, payPhone],
+      )
       return { date: lead.slot_date ? isoDate(lead.slot_date) : null, time: lead.slot_time }
     }
     return null
@@ -88,13 +92,24 @@ async function confirmPaidLead(phone, slotId = null, paymentId = null) {
   await query(
     `UPDATE leads
         SET paid = true, paid_at = now(), slot_status = 'confirmed',
-            rzp_payment_id = COALESCE($2, rzp_payment_id), updated_at = now()
+            rzp_payment_id = COALESCE($2, rzp_payment_id),
+            payment_phone = COALESCE($3, payment_phone),
+            payment_status = 'success', wa_payment = 'success', updated_at = now()
       WHERE phone = $1`,
-    [phone, paymentId],
+    [phone, paymentId, payPhone],
   )
-  sendWhatsApp(phone, confirmationMessage(date, seat.slot_time), 'confirmation').catch(() => {})
+  // payment confirmation WhatsApp — WATI template if set up, else Whapi text
+  if (watiConfigured()) {
+    watiPaymentSuccess(phone).catch((e) =>
+      // eslint-disable-next-line no-console
+      console.error('[wati] payment_success failed:', e.message),
+    )
+  } else {
+    sendWhatsApp(phone, confirmationMessage(date, seat.slot_time), 'confirmation').catch(() => {})
+  }
   // each paid booking may unlock fake-booked seats (scarcity drip)
   applySlotDrip(date).catch(() => {})
+  syncLeadsToSheetSafe() // reflect the paid status in the linked Google Sheet
   return { date, time: seat.slot_time }
 }
 
@@ -155,16 +170,32 @@ async function handlePaymentCaptured(payment, event) {
     await logUnmatchedPayment(payment, event)
     return
   }
-  const r = await confirmPaidLead(phone, null, payment?.id || null)
+  const r = await confirmPaidLead(phone, null, payment?.id || null, payment?.contact || null)
   // eslint-disable-next-line no-console
   console.log(`[webhook] captured ${payment?.id} → ${phone} (${matchedBy})${r ? '' : ' [no seat to claim]'}`)
 }
 
 async function handlePaymentFailed(payment) {
-  const phone =
-    String(payment?.notes?.phone || '').replace(/\D/g, '') ||
-    String(payment?.contact || '').replace(/\D/g, '').slice(-10)
-  // The lead stays unpaid; the funnel UI lets them retry. We only log here.
+  const notePhone = String(payment?.notes?.phone || '').replace(/\D/g, '')
+  const contact10 = String(payment?.contact || '').replace(/\D/g, '').slice(-10)
+  const phone = notePhone || contact10
+  if (phone) {
+    // record the failed attempt on the lead so the registry shows it
+    const { rows } = await query(
+      `UPDATE leads
+          SET payment_status = 'failed', wa_payment = 'failed',
+              payment_phone = COALESCE($2, payment_phone), updated_at = now()
+        WHERE phone = $1 AND paid = false
+        RETURNING name`,
+      [phone, payment?.contact ? contact10 : null],
+    )
+    if (rows.length && watiConfigured()) {
+      watiPaymentFailed(phone).catch((e) =>
+        // eslint-disable-next-line no-console
+        console.error('[wati] payment_failed_ failed:', e.message),
+      )
+    }
+  }
   // eslint-disable-next-line no-console
   console.log(`[webhook] payment.failed ${payment?.id} phone=${phone || '?'} ${payment?.error_description || ''}`)
 }
@@ -295,7 +326,8 @@ paymentRouter.post(
     const valid = isMock() ? true : verifyPayment({ orderId, paymentId, signature })
     if (!valid) return res.status(400).json({ error: 'payment verification failed' })
 
-    const r = await confirmPaidLead(phone, slotId, paymentId || null)
+    // popup path: the payer's contact is the number they registered with
+    const r = await confirmPaidLead(phone, slotId, paymentId || null, phone)
     if (!r) return res.status(409).json({ error: 'hold expired — please pick a slot again' })
     res.json({ ok: true, date: r.date, time: r.time })
   }),
@@ -340,12 +372,13 @@ paymentRouter.get(
     // contact matches this phone. Either path removes the webhook dependency.
     let captured = await orderHasCapturedPayment(orderId || lead.rzp_order_id)
     let payId = null
+    let payContact = null
     if (!captured) {
       const recent = await recentCapturedPaymentForPhone(phone)
-      if (recent) { captured = true; payId = recent.paymentId }
+      if (recent) { captured = true; payId = recent.paymentId; payContact = recent.contact }
     }
     if (captured) {
-      const r = await confirmPaidLead(phone, null, payId)
+      const r = await confirmPaidLead(phone, null, payId, payContact)
       if (r) return res.json({ paid: true, date: r.date, time: r.time })
       // captured but no slot on record — still surface the payment
       await query(

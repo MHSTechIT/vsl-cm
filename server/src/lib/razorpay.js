@@ -105,7 +105,7 @@ export async function recentCapturedPaymentForPhone(phone, windowMins = 120) {
       body: JSON.stringify({ amount: match.amount, currency: match.currency }),
     }).catch(() => {})
   }
-  return { paymentId: match.id, amount: match.amount }
+  return { paymentId: match.id, amount: match.amount, contact: match.contact || null }
 }
 
 // Verify the payment signature from Razorpay checkout. Mock mode always passes.

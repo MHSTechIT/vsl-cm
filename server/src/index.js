@@ -5,7 +5,9 @@ import { leadsRouter } from './routes/leads.js'
 import { slotsRouter } from './routes/slots.js'
 import { paymentRouter, razorpayWebhook } from './routes/payment.js'
 import { adminRouter } from './routes/admin.js'
+import { watiWebhook } from './routes/watiWebhook.js'
 import { startHoldSweeper } from './lib/holds.js'
+import { startReminderSweeper } from './lib/reminders.js'
 import { ah } from './lib/ah.js'
 import { getSettings } from './lib/settings.js'
 import { query } from './db.js'
@@ -18,6 +20,9 @@ app.use(cors({ origin: config.corsOrigin }))
 app.post('/api/payment/webhook', express.raw({ type: '*/*' }), razorpayWebhook)
 
 app.use(express.json())
+
+// WATI inbound-message webhook (JSON body)
+app.post('/api/wati/webhook', watiWebhook)
 
 app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }))
 
@@ -116,4 +121,5 @@ app.listen(config.port, () => {
   // eslint-disable-next-line no-console
   console.log(`✓ API on http://localhost:${config.port}  (razorpay: ${config.razorpay.mode})`)
   startHoldSweeper()
+  startReminderSweeper()
 })

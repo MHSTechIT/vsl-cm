@@ -82,6 +82,35 @@ ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS image_id INTEGER;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS rzp_order_id TEXT;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS rzp_payment_id TEXT;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS refunded_at TIMESTAMPTZ;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS payment_phone TEXT;        -- contact the payer typed in Razorpay
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS payment_status TEXT;       -- 'success' | 'failed' | null
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS wa_payment TEXT;           -- payment WhatsApp: 'success' | 'failed' | null
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS wa_1h_sent BOOLEAN NOT NULL DEFAULT false; -- 1-hour-before reminder fired
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS hc_status TEXT;            -- health-check status (logic TBD)
+
+-- WATI WhatsApp inbox — every inbound/outbound message, for the chat page.
+CREATE TABLE IF NOT EXISTS wa_messages (
+  id          BIGSERIAL PRIMARY KEY,
+  wa_id       TEXT NOT NULL,            -- the customer's WhatsApp number (91…)
+  name        TEXT,                     -- sender display name (from WATI)
+  direction   TEXT NOT NULL,            -- 'in' (from customer) | 'out' (we sent)
+  text        TEXT,
+  type        TEXT DEFAULT 'text',
+  wati_id     TEXT,                     -- WATI message id (dedupe)
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_wa_messages_thread ON wa_messages (wa_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wa_messages_watiid ON wa_messages (wati_id) WHERE wati_id IS NOT NULL;
+
+-- Staff accounts created from the admin Users page (name + phone + password).
+CREATE TABLE IF NOT EXISTS users (
+  id          SERIAL PRIMARY KEY,
+  name        TEXT NOT NULL,
+  phone       TEXT UNIQUE NOT NULL,
+  pass_salt   TEXT NOT NULL,
+  pass_hash   TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 ALTER TABLE slots ADD COLUMN IF NOT EXISTS release_wave INTEGER;
 
 -- Idempotency log — Razorpay retries webhooks; the unique (source,event_id)

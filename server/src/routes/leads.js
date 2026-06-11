@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { query } from '../db.js'
 import { ah } from '../lib/ah.js'
+import { syncLeadsToSheetSafe } from '../lib/google-sheets.js'
 
 export const leadsRouter = Router()
 
@@ -19,6 +20,7 @@ leadsRouter.post(
       [phone, name],
     )
     res.json({ ok: true, phone })
+    syncLeadsToSheetSafe() // keep the linked Google Sheet live (fire-and-forget)
   }),
 )
 

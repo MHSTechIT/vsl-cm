@@ -81,4 +81,14 @@ export const adminApi = {
   removeTime: (date, time) =>
     req('/slots/remove', { method: 'POST', body: JSON.stringify({ date, time }) }),
   waSent: (phone) => req(`/leads/${encodeURIComponent(phone)}/wa-sent`, { method: 'POST' }),
+  users: () => req('/users'),
+  createUser: (name, phone, password) =>
+    req('/users', { method: 'POST', body: JSON.stringify({ name, phone, password }) }),
+  deleteUser: (id) => req(`/users/${id}`, { method: 'DELETE' }),
+  waConversations: () => req('/wa/conversations'),
+  waMessages: (waId) => req(`/wa/messages/${encodeURIComponent(waId)}`),
+  waSend: (waId, text) => req('/wa/send', { method: 'POST', body: JSON.stringify({ waId, text }) }),
+  sheets: () => req('/sheets'),
+  saveSheet: (url) => req('/sheets', { method: 'POST', body: JSON.stringify({ url }) }),
+  syncSheet: () => req('/sheets/sync', { method: 'POST' }),
 }

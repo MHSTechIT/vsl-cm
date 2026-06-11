@@ -29,5 +29,24 @@ export const config = {
     baseUrl: process.env.WHAPI_BASE_URL || 'https://gate.whapi.cloud',
   },
 
+  // WATI WhatsApp template API (utility templates: payment_success / payment_failed_ / one_hour)
+  wati: {
+    token: process.env.WATI_TOKEN || '',
+    baseUrl: process.env.WATI_BASE_URL || '',
+    webhookToken: process.env.WATI_WEBHOOK_TOKEN || '',
+    templates: {
+      paymentSuccess: process.env.WATI_TPL_PAYMENT_SUCCESS || 'payment_success',
+      paymentFailed: process.env.WATI_TPL_PAYMENT_FAILED || 'payment_failed_',
+      oneHour: process.env.WATI_TPL_ONE_HOUR || 'one_hour',
+    },
+  },
+
+  // Google OAuth (Sheets export). Refresh-token flow — no per-request login.
+  google: {
+    clientId: process.env.GOOGLE_OAUTH_CLIENT_ID || '',
+    clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || '',
+    refreshToken: process.env.GOOGLE_OAUTH_REFRESH_TOKEN || '',
+  },
+
   adminToken: process.env.ADMIN_TOKEN || 'change-me-admin-token',
 }

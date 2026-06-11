@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import { Router } from 'express'
 import multer from 'multer'
 import { query } from '../db.js'
@@ -7,6 +8,8 @@ import { applyDripAll, DAY_SEATS, DAY_OPEN } from '../lib/drip.js'
 import { isoDate } from './slots.js'
 import { ah } from '../lib/ah.js'
 import { setSetting, getSettings } from '../lib/settings.js'
+import { syncLeadsToSheet, spreadsheetIdFromUrl, isConfigured as googleConfigured } from '../lib/google-sheets.js'
+import { sendSessionMessage, watiConfigured } from '../lib/wati.js'
 
 export const adminRouter = Router()
 
@@ -60,8 +63,9 @@ adminRouter.get(
   '/leads',
   ah(async (_req, res) => {
     const { rows } = await query(
-      `SELECT phone, name, registered_at, watch_percent, hit_15min,
-              form2_submitted, slot_date, slot_time, slot_status, paid, paid_at, needs_wa
+      `SELECT phone, name, registered_at, watch_percent, form2_submitted,
+              slot_date, slot_time, slot_status, paid, paid_at, needs_wa,
+              payment_phone, payment_status, wa_payment, wa_1h_sent, hc_status
          FROM leads
         ORDER BY registered_at DESC`,
     )
@@ -82,6 +86,56 @@ adminRouter.get(
         ORDER BY received_at DESC`,
     )
     res.json(rows)
+  }),
+)
+
+// ---- Staff accounts (admin Users page) ----
+const hashPassword = (pw) => {
+  const salt = crypto.randomBytes(16).toString('hex')
+  const hash = crypto.scryptSync(pw, salt, 64).toString('hex')
+  return { salt, hash }
+}
+
+adminRouter.get(
+  '/users',
+  ah(async (_req, res) => {
+    const { rows } = await query(
+      `SELECT id, name, phone, created_at FROM users ORDER BY created_at DESC`,
+    )
+    res.json(rows)
+  }),
+)
+
+adminRouter.post(
+  '/users',
+  ah(async (req, res) => {
+    const name = String(req.body?.name || '').trim()
+    const phone = String(req.body?.phone || '').replace(/\D/g, '')
+    const password = String(req.body?.password || '')
+    if (!name) return res.status(400).json({ error: 'name is required' })
+    if (phone.length < 8) return res.status(400).json({ error: 'a valid phone number is required' })
+    if (password.length < 4) return res.status(400).json({ error: 'password must be at least 4 characters' })
+
+    const { salt, hash } = hashPassword(password)
+    try {
+      const { rows } = await query(
+        `INSERT INTO users (name, phone, pass_salt, pass_hash) VALUES ($1, $2, $3, $4)
+         RETURNING id, name, phone, created_at`,
+        [name, phone, salt, hash],
+      )
+      res.json(rows[0])
+    } catch (e) {
+      if (e.code === '23505') return res.status(409).json({ error: 'an account with that phone already exists' })
+      throw e
+    }
+  }),
+)
+
+adminRouter.delete(
+  '/users/:id',
+  ah(async (req, res) => {
+    await query(`DELETE FROM users WHERE id = $1`, [Number(req.params.id)])
+    res.json({ ok: true })
   }),
 )
 
@@ -425,3 +479,101 @@ adminRouter.get('/settings', (_req, res) => {
     whapiConnected: Boolean(config.whapi.token),
   })
 })
+
+// ---- WATI inbox (WhatsApp-web-style chat) ----
+// Conversation list: latest message per customer number, newest first.
+adminRouter.get(
+  '/wa/conversations',
+  ah(async (_req, res) => {
+    const { rows } = await query(
+      `SELECT t.wa_id, t.name, t.text, t.direction, t.created_at
+         FROM (
+           SELECT DISTINCT ON (wa_id) wa_id, name, text, direction, created_at
+             FROM wa_messages ORDER BY wa_id, created_at DESC
+         ) t
+        ORDER BY t.created_at DESC`,
+    )
+    res.json({ watiConfigured: watiConfigured(), conversations: rows })
+  }),
+)
+
+// Full thread for one number.
+adminRouter.get(
+  '/wa/messages/:waId',
+  ah(async (req, res) => {
+    const waId = String(req.params.waId).replace(/\D/g, '')
+    const { rows } = await query(
+      `SELECT id, name, direction, text, type, created_at
+         FROM wa_messages WHERE wa_id = $1 ORDER BY created_at`,
+      [waId],
+    )
+    res.json(rows)
+  }),
+)
+
+// Send a reply (session message) and store it as outgoing.
+adminRouter.post(
+  '/wa/send',
+  ah(async (req, res) => {
+    const waId = String(req.body?.waId || '').replace(/\D/g, '')
+    const text = String(req.body?.text || '').trim()
+    if (!waId || !text) return res.status(400).json({ error: 'waId and text required' })
+    try {
+      await sendSessionMessage(waId, text)
+      const { rows } = await query(
+        `INSERT INTO wa_messages (wa_id, direction, text, type) VALUES ($1, 'out', $2, 'text')
+         RETURNING id, direction, text, created_at`,
+        [waId, text],
+      )
+      res.json({ ok: true, message: rows[0] })
+    } catch (e) {
+      res.status(502).json({ error: e.message })
+    }
+  }),
+)
+
+// ---- Google Sheets export ----
+adminRouter.get(
+  '/sheets',
+  ah(async (_req, res) => {
+    const s = await getSettings(['sheets_url', 'sheets_last_sync'])
+    res.json({
+      googleConfigured: googleConfigured(),
+      url: s.sheets_url || '',
+      linked: Boolean(spreadsheetIdFromUrl(s.sheets_url)),
+      lastSync: s.sheets_last_sync || null,
+    })
+  }),
+)
+
+// Save the sheet link, then immediately push the current leads into it.
+adminRouter.post(
+  '/sheets',
+  ah(async (req, res) => {
+    const url = String(req.body?.url || '').trim()
+    if (url && !spreadsheetIdFromUrl(url)) {
+      return res.status(400).json({ error: "That doesn't look like a Google Sheet link" })
+    }
+    await setSetting('sheets_url', url)
+    if (!url) return res.json({ ok: true, synced: 0 })
+    try {
+      const count = await syncLeadsToSheet()
+      res.json({ ok: true, synced: count })
+    } catch (e) {
+      res.status(502).json({ error: e.message })
+    }
+  }),
+)
+
+// Push leads into the linked sheet now.
+adminRouter.post(
+  '/sheets/sync',
+  ah(async (_req, res) => {
+    try {
+      const count = await syncLeadsToSheet()
+      res.json({ ok: true, synced: count })
+    } catch (e) {
+      res.status(502).json({ error: e.message })
+    }
+  }),
+)

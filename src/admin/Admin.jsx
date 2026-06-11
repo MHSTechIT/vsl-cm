@@ -7,6 +7,14 @@ const abs = (p) => (p ? `${API_BASE}${p}` : '')
 const pct = (n, d) => (d > 0 ? `${((n / d) * 100).toFixed(1)}%` : '—')
 const fmtDate = (iso) =>
   iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'
+// full timestamp (payment time) → "10 Jun, 11:38 am" in IST
+const fmtDateTime = (iso) =>
+  iso
+    ? new Date(iso).toLocaleString('en-IN', {
+        day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
+        hour12: true, timeZone: 'Asia/Kolkata',
+      })
+    : '—'
 
 // ---------- tiny inline icons ----------
 const Icon = {
@@ -15,6 +23,8 @@ const Icon = {
   slots: <path d="M7 2v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2H7zm12 8v10H5V10h14z" />,
   settings: <path d="M19.4 13a7.8 7.8 0 0 0 .1-1 7.8 7.8 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7.3 7.3 0 0 0-1.7-1l-.4-2.5H9.1l-.4 2.5a7.3 7.3 0 0 0-1.7 1l-2.4-1-2 3.4L4.6 11a7.8 7.8 0 0 0 0 2l-2 1.6 2 3.4 2.4-1c.5.4 1.1.7 1.7 1l.4 2.5h5.8l.4-2.5c.6-.3 1.2-.6 1.7-1l2.4 1 2-3.4-2-1.6zM12 15.5A3.5 3.5 0 1 1 15.5 12 3.5 3.5 0 0 1 12 15.5z" />,
   upload: <path d="M11 16V7.8L8.4 10.4 7 9l5-5 5 5-1.4 1.4L13 7.8V16h-2zM5 18h14v2H5v-2z" />,
+  users: <path d="M16 11a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm-8 0a3 3 0 1 0-3-3 3 3 0 0 0 3 3zm0 2c-2.7 0-8 1.3-8 4v3h9v-3c0-1 .4-1.9 1-2.6A13 13 0 0 0 8 13zm8 0c-.3 0-.7 0-1.1.1A5 5 0 0 1 18 17v3h6v-3c0-2.7-5.3-4-8-4z" />,
+  wati: <path d="M12 3C6.5 3 2 6.9 2 11.7c0 2.5 1.2 4.7 3.2 6.3L4 22l4.3-1.5c1.1.3 2.4.5 3.7.5 5.5 0 10-3.9 10-8.8S17.5 3 12 3z" />,
 }
 const NavIcon = ({ name }) => (
   <svg className="adm-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -355,13 +365,17 @@ function Leads() {
   })
 
   function exportCsv() {
-    const head = ['Name', 'Phone', 'Watch%', 'Form2', 'Slot', 'Status', 'Registered']
+    const head = ['Name', 'Phone', 'Pay phone', 'Watch%', 'Form2', 'Slot date & time',
+      'WA payment', 'WA 1-hr', 'Registered at', 'Payment status', 'HC status']
     const lines = filtered.map((r) => [
-      r.name, r.phone, r.watch_percent,
+      r.name, r.phone, r.payment_phone || '', r.watch_percent,
       r.form2_submitted ? 'yes' : 'no',
       r.slot_date ? `${r.slot_date} ${r.slot_time}` : '',
-      r.paid ? 'paid' : r.slot_status || '',
-      r.registered_at?.slice(0, 10),
+      r.wa_payment || '',
+      r.wa_1h_sent ? 'yes' : 'no',
+      r.paid_at ? r.paid_at.slice(0, 19).replace('T', ' ') : '',
+      r.payment_status || (r.paid ? 'success' : ''),
+      r.hc_status || '',
     ])
     const csv = [head, ...lines].map((row) => row.map((c) => `"${String(c ?? '')}"`).join(',')).join('\n')
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
@@ -371,8 +385,6 @@ function Leads() {
     a.click()
     URL.revokeObjectURL(url)
   }
-
-  async function markWa(phone) { await adminApi.waSent(phone); load() }
 
   return (
     <section className="adm-panel">
@@ -406,32 +418,39 @@ function Leads() {
         <table className="adm-table">
           <thead>
             <tr>
-              <th>Name</th><th>Phone</th><th>Watch</th><th>Form 2</th>
-              <th>Slot</th><th>Status</th><th>Registered</th><th>WhatsApp</th>
+              <th>Name</th><th>Phone</th><th>Pay phone</th><th>Watch</th><th>Form 2</th>
+              <th>Slot date &amp; time</th><th>WA payment</th><th>WA 1-hr</th>
+              <th>Registered at</th><th>Payment status</th><th>HC status</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((r) => (
+            {filtered.map((r) => {
+              const payStatus = r.payment_status || (r.paid ? 'success' : null)
+              return (
               <tr key={r.phone}>
                 <td className="adm-strong">{r.name}</td>
                 <td className="adm-mono">{r.phone}</td>
+                <td className="adm-mono">{r.payment_phone || <span className="adm-dash">—</span>}</td>
                 <td className="adm-mono">{r.watch_percent}%</td>
                 <td>{r.form2_submitted ? <Pill c="blue">Yes</Pill> : <span className="adm-dash">—</span>}</td>
                 <td>{r.slot_date ? `${fmtDate(r.slot_date)} · ${r.slot_time}` : <span className="adm-dash">—</span>}</td>
                 <td>
-                  {r.paid ? <Pill c="green">Paid</Pill>
-                    : r.slot_status === 'pending' ? <Pill c="amber">Hold</Pill>
+                  {r.wa_payment === 'success' ? <Pill c="green">Success</Pill>
+                    : r.wa_payment === 'failed' ? <Pill c="red">Failed</Pill>
                     : <span className="adm-dash">—</span>}
                 </td>
-                <td>{fmtDate(r.registered_at?.slice(0, 10))}</td>
+                <td>{r.wa_1h_sent ? <Pill c="green">Yes</Pill> : <Pill c="grey">No</Pill>}</td>
+                <td>{r.paid_at ? fmtDateTime(r.paid_at) : <span className="adm-dash">—</span>}</td>
                 <td>
-                  {r.needs_wa
-                    ? <button className="adm-wa" onClick={() => markWa(r.phone)}>send · {r.needs_wa}</button>
+                  {payStatus === 'success' ? <Pill c="green">Success</Pill>
+                    : payStatus === 'failed' ? <Pill c="red">Failed</Pill>
                     : <span className="adm-dash">—</span>}
                 </td>
+                <td>{r.hc_status || <span className="adm-dash">—</span>}</td>
               </tr>
-            ))}
-            {filtered.length === 0 && <tr><td colSpan="8" className="adm-empty">No leads yet.</td></tr>}
+              )
+            })}
+            {filtered.length === 0 && <tr><td colSpan="11" className="adm-empty">No leads yet.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -885,13 +904,298 @@ function TestimonialManager() {
   )
 }
 
+// ---------- Users ----------
+function Users() {
+  const [list, setList] = useState([])
+  const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [pw, setPw] = useState('')
+  const [pw2, setPw2] = useState('')
+  const [show, setShow] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null) // { kind, text }
+
+  const load = useCallback(() => adminApi.users().then(setList).catch(() => {}), [])
+  useEffect(() => { load() }, [load])
+
+  async function create(e) {
+    e.preventDefault()
+    setMsg(null)
+    if (!name.trim()) return setMsg({ kind: 'err', text: 'Enter a name.' })
+    if (phone.replace(/\D/g, '').length < 8) return setMsg({ kind: 'err', text: 'Enter a valid phone number.' })
+    if (pw.length < 4) return setMsg({ kind: 'err', text: 'Password must be at least 4 characters.' })
+    if (pw !== pw2) return setMsg({ kind: 'err', text: 'Passwords do not match.' })
+    setBusy(true)
+    try {
+      await adminApi.createUser(name.trim(), phone, pw)
+      setName(''); setPhone(''); setPw(''); setPw2('')
+      setMsg({ kind: 'ok', text: 'Account created.' })
+      load()
+    } catch (e2) {
+      setMsg({ kind: 'err', text: e2.message })
+    } finally { setBusy(false) }
+  }
+  async function del(id, n) {
+    if (!confirm(`Delete the account for ${n}?`)) return
+    await adminApi.deleteUser(id); load()
+  }
+
+  return (
+    <section className="adm-panel">
+      <div className="adm-panel-head">
+        <div>
+          <h1 className="adm-h1">Users</h1>
+          <p className="adm-sub"><b>{list.length}</b> account{list.length === 1 ? '' : 's'}</p>
+        </div>
+      </div>
+
+      <div className="up-cardgrid up-cardgrid--split">
+        <div className="up-card up-card--wide">
+          <h2 className="adm-h2">Create an account</h2>
+          <form className="tm-form" onSubmit={create}>
+            <input className="reg-input" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+            <input className="reg-input" type="tel" inputMode="numeric" placeholder="Phone number"
+              value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <div className="adm-pass">
+              <input className="reg-input" type={show ? 'text' : 'password'} placeholder="Password"
+                value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" />
+              <button type="button" className="adm-eye" onClick={() => setShow((v) => !v)} aria-label="Toggle password">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+                  strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" /><circle cx="12" cy="12" r="3" />
+                  {show && <line x1="4" y1="4" x2="20" y2="20" />}
+                </svg>
+              </button>
+            </div>
+            <input className="reg-input" type={show ? 'text' : 'password'} placeholder="Re-enter password"
+              value={pw2} onChange={(e) => setPw2(e.target.value)} autoComplete="new-password" />
+            <button className="adm-btn adm-btn-primary" type="submit" disabled={busy}>
+              {busy ? 'Creating…' : 'Create account'}
+            </button>
+            {msg && <p className={msg.kind === 'ok' ? 'adm-msg' : 'reg-error'} style={{ margin: 0 }}>{msg.text}</p>}
+          </form>
+        </div>
+
+        <div className="up-card up-card--list">
+          <h2 className="adm-h2">Accounts ({list.length})</h2>
+          {list.length === 0 ? (
+            <p className="adm-sub" style={{ marginTop: 0 }}>No accounts yet — create the first one on the left.</p>
+          ) : (
+            <div className="tm-list">
+              {list.map((u) => (
+                <div className="tm-item" key={u.id}>
+                  <div className="tm-meta">
+                    <span className="adm-strong">{u.name}</span>
+                    <span className="tm-stat">{u.phone}</span>
+                  </div>
+                  <button className="adm-link" onClick={() => del(u.id, u.name)}>delete</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ---------- WATI inbox (WhatsApp-web-style) ----------
+const fmtTime = (iso) =>
+  iso ? new Date(iso).toLocaleString('en-IN', {
+    day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata',
+  }) : ''
+
+function WatiChat() {
+  const [convos, setConvos] = useState([])
+  const [configured, setConfigured] = useState(true)
+  const [active, setActive] = useState(null)   // wa_id
+  const [activeName, setActiveName] = useState('')
+  const [msgs, setMsgs] = useState([])
+  const [text, setText] = useState('')
+  const [sending, setSending] = useState(false)
+  const [err, setErr] = useState('')
+  const [q, setQ] = useState('')
+  const bottomRef = useRef(null)
+
+  const loadConvos = useCallback(() => {
+    adminApi.waConversations().then((d) => {
+      setConvos(d.conversations || [])
+      setConfigured(d.watiConfigured)
+    }).catch(() => {})
+  }, [])
+  const loadMsgs = useCallback((id) => {
+    if (!id) return
+    adminApi.waMessages(id).then(setMsgs).catch(() => {})
+  }, [])
+
+  // poll conversations every 5s; messages of the open thread every 3s
+  useEffect(() => { loadConvos(); const t = setInterval(loadConvos, 5000); return () => clearInterval(t) }, [loadConvos])
+  useEffect(() => {
+    if (!active) return
+    loadMsgs(active)
+    const t = setInterval(() => loadMsgs(active), 3000)
+    return () => clearInterval(t)
+  }, [active, loadMsgs])
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [msgs])
+
+  function openChat(c) { setActive(c.wa_id); setActiveName(c.name || ''); setErr('') }
+
+  async function send(e) {
+    e.preventDefault()
+    const body = text.trim()
+    if (!body || !active) return
+    setSending(true); setErr('')
+    try {
+      const r = await adminApi.waSend(active, body)
+      setMsgs((m) => [...m, r.message])
+      setText('')
+      loadConvos()
+    } catch (e2) { setErr(e2.message) }
+    finally { setSending(false) }
+  }
+
+  const shown = convos.filter((c) =>
+    !q || `${c.name || ''} ${c.wa_id}`.toLowerCase().includes(q.toLowerCase()))
+
+  return (
+    <section className="adm-panel wa-panel">
+      <div className="adm-panel-head">
+        <div>
+          <h1 className="adm-h1">WhatsApp inbox</h1>
+          <p className="adm-sub">
+            {configured ? 'Replies go to the customer’s WhatsApp via WATI.' : 'WATI not configured — set WATI_TOKEN + WATI_BASE_URL.'}
+          </p>
+        </div>
+      </div>
+
+      <div className="wa-wrap">
+        <aside className="wa-list">
+          <input className="wa-search" placeholder="Search chats" value={q} onChange={(e) => setQ(e.target.value)} />
+          {shown.length === 0 && <p className="adm-empty" style={{ fontSize: '0.85rem' }}>No conversations yet.</p>}
+          {shown.map((c) => (
+            <button key={c.wa_id} className={`wa-conv ${active === c.wa_id ? 'is-active' : ''}`} onClick={() => openChat(c)}>
+              <span className="wa-avatar">{(c.name || c.wa_id || '?').slice(0, 1).toUpperCase()}</span>
+              <span className="wa-conv-body">
+                <span className="wa-conv-top">
+                  <b>{c.name || c.wa_id}</b>
+                  <em>{fmtTime(c.created_at).split(',')[0]}</em>
+                </span>
+                <span className="wa-conv-snip">{c.direction === 'out' ? 'You: ' : ''}{c.text}</span>
+              </span>
+            </button>
+          ))}
+        </aside>
+
+        <div className="wa-thread">
+          {!active ? (
+            <div className="wa-empty">Select a conversation to start chatting.</div>
+          ) : (
+            <>
+              <div className="wa-thread-head">
+                <span className="wa-avatar">{(activeName || active).slice(0, 1).toUpperCase()}</span>
+                <div>
+                  <strong>{activeName || active}</strong>
+                  <span className="adm-mono wa-thread-num">{active}</span>
+                </div>
+              </div>
+              <div className="wa-msgs">
+                {msgs.map((m) => (
+                  <div key={m.id} className={`wa-bubble wa-${m.direction}`}>
+                    <span>{m.text}</span>
+                    <em>{fmtTime(m.created_at)}</em>
+                  </div>
+                ))}
+                <div ref={bottomRef} />
+              </div>
+              {err && <p className="reg-error" style={{ margin: '0 12px' }}>{err}</p>}
+              <form className="wa-compose" onSubmit={send}>
+                <input placeholder="Type a reply…" value={text} onChange={(e) => setText(e.target.value)} disabled={!configured} />
+                <button className="adm-btn adm-btn-primary" type="submit" disabled={sending || !configured || !text.trim()}>
+                  {sending ? '…' : 'Send'}
+                </button>
+              </form>
+            </>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 // ---------- Settings ----------
 function Settings() {
   const [s, setS] = useState(null)
-  useEffect(() => { adminApi.settings().then(setS).catch(() => {}) }, [])
+  const [sheet, setSheet] = useState(null)   // { googleConfigured, url, linked, lastSync }
+  const [url, setUrl] = useState('')
+  const [busy, setBusy] = useState('')        // '' | 'save' | 'sync'
+  const [msg, setMsg] = useState(null)        // { kind, text }
+
+  const loadSheet = useCallback(
+    () => adminApi.sheets().then((d) => { setSheet(d); setUrl(d.url || '') }).catch(() => {}),
+    [],
+  )
+  useEffect(() => {
+    adminApi.settings().then(setS).catch(() => {})
+    loadSheet()
+  }, [loadSheet])
+
+  async function saveSheet() {
+    setBusy('save'); setMsg(null)
+    try {
+      const r = await adminApi.saveSheet(url.trim())
+      setMsg({ kind: 'ok', text: url.trim() ? `Saved & synced ${r.synced} lead(s) to the sheet.` : 'Sheet link cleared.' })
+      loadSheet()
+    } catch (e) { setMsg({ kind: 'err', text: e.message }) }
+    finally { setBusy('') }
+  }
+  async function syncNow() {
+    setBusy('sync'); setMsg(null)
+    try {
+      const r = await adminApi.syncSheet()
+      setMsg({ kind: 'ok', text: `Synced ${r.synced} lead(s) to the sheet.` })
+      loadSheet()
+    } catch (e) { setMsg({ kind: 'err', text: e.message }) }
+    finally { setBusy('') }
+  }
+
   return (
     <section className="adm-panel">
       <div className="adm-panel-head"><div><h1 className="adm-h1">Settings</h1></div></div>
+
+      <div className="adm-block">
+        <h2 className="adm-h2">Google Sheet export</h2>
+        <p className="adm-sub" style={{ marginTop: 0, marginBottom: 14 }}>
+          Paste your Google Sheet link — every lead from the Leads page is mirrored here,
+          and the sheet updates automatically on each new registration and payment.
+        </p>
+        <div className="adm-filterbar" style={{ marginBottom: 10 }}>
+          <input
+            placeholder="https://docs.google.com/spreadsheets/d/…"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            style={{ flex: 1, minWidth: 240 }}
+          />
+          <button className="adm-btn adm-btn-primary" onClick={saveSheet} disabled={busy === 'save'}>
+            {busy === 'save' ? 'Saving…' : 'Save & sync'}
+          </button>
+          {sheet?.linked && (
+            <button className="adm-btn adm-btn-ghost" onClick={syncNow} disabled={busy === 'sync'}>
+              {busy === 'sync' ? 'Syncing…' : 'Sync now'}
+            </button>
+          )}
+        </div>
+        {msg && (
+          <p className={msg.kind === 'ok' ? 'adm-msg' : 'reg-error'} style={{ margin: '0 0 8px' }}>{msg.text}</p>
+        )}
+        {sheet && (
+          <div className="adm-settings">
+            <p>Google account <b>{sheet.googleConfigured ? 'connected' : 'not configured (set OAuth in .env)'}</b></p>
+            <p>Sheet <b>{sheet.linked ? 'linked' : 'not linked'}</b></p>
+            {sheet.lastSync && <p>Last sync <b>{new Date(sheet.lastSync).toLocaleString('en-IN')}</b></p>}
+          </div>
+        )}
+      </div>
+
       {s && (
         <div className="adm-block adm-settings">
           <p>Hold window <b>{s.holdWindowMinutes} min</b> <span className="adm-dash">(set in server .env)</span></p>
@@ -918,6 +1222,8 @@ export default function Admin() {
   const nav = [
     { id: 'dashboard', label: 'Overview' },
     { id: 'leads', label: 'Leads' },
+    { id: 'users', label: 'Users' },
+    { id: 'wati', label: 'WATI' },
     { id: 'slots', label: 'Slots' },
     { id: 'upload', label: 'Upload' },
     { id: 'settings', label: 'Settings' },
@@ -951,6 +1257,8 @@ export default function Admin() {
       <main className="adm-content">
         {tab === 'dashboard' && <Dashboard />}
         {tab === 'leads' && <Leads />}
+        {tab === 'users' && <Users />}
+        {tab === 'wati' && <WatiChat />}
         {tab === 'slots' && <Slots />}
         {tab === 'upload' && <Upload />}
         {tab === 'settings' && <Settings />}

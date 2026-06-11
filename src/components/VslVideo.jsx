@@ -149,6 +149,8 @@ export default function VslVideo() {
           src={src}
           poster={poster}
           controls={registered}
+          controlsList="nodownload noplaybackrate noremoteplayback"
+          disablePictureInPicture
           playsInline
           preload="metadata"
           onTimeUpdate={onTimeUpdate}
