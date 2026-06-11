@@ -2,7 +2,13 @@ import crypto from 'node:crypto'
 import { Router } from 'express'
 import { query } from '../db.js'
 import { config } from '../config.js'
-import { createOrder, verifyPayment, isMock, orderHasCapturedPayment } from '../lib/razorpay.js'
+import {
+  createOrder,
+  verifyPayment,
+  isMock,
+  orderHasCapturedPayment,
+  recentCapturedPaymentForPhone,
+} from '../lib/razorpay.js'
 import { applySlotDrip } from '../lib/drip.js'
 import { sendWhatsApp, confirmationMessage } from '../lib/whapi.js'
 import { isoDate } from './slots.js'
@@ -329,11 +335,25 @@ paymentRouter.get(
       })
     }
 
-    if (await orderHasCapturedPayment(orderId || lead.rzp_order_id)) {
-      const r = await confirmPaidLead(phone)
+    // Reconcile with Razorpay directly: by order id (Checkout popup), or — for
+    // a static hosted link with no order — by a recent captured payment whose
+    // contact matches this phone. Either path removes the webhook dependency.
+    let captured = await orderHasCapturedPayment(orderId || lead.rzp_order_id)
+    let payId = null
+    if (!captured) {
+      const recent = await recentCapturedPaymentForPhone(phone)
+      if (recent) { captured = true; payId = recent.paymentId }
+    }
+    if (captured) {
+      const r = await confirmPaidLead(phone, null, payId)
       if (r) return res.json({ paid: true, date: r.date, time: r.time })
       // captured but no slot on record — still surface the payment
-      await query(`UPDATE leads SET paid = true, paid_at = now(), updated_at = now() WHERE phone = $1`, [phone])
+      await query(
+        `UPDATE leads SET paid = true, paid_at = now(),
+            rzp_payment_id = COALESCE($2, rzp_payment_id), updated_at = now()
+          WHERE phone = $1`,
+        [phone, payId],
+      )
       return res.json({ paid: true, date: null, time: null })
     }
     res.json({ paid: false })

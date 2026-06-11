@@ -77,6 +77,37 @@ export async function orderHasCapturedPayment(orderId) {
   return false
 }
 
+// For a static hosted payment link there's no order id to reconcile against,
+// so ask Razorpay for a recently-captured payment whose payer contact matches
+// this lead's phone. Looks back `windowMins` (default 2h). Live keys only.
+export async function recentCapturedPaymentForPhone(phone, windowMins = 120) {
+  if (isMock() || !keyId || !keySecret) return null
+  const last10 = String(phone).replace(/\D/g, '').slice(-10)
+  if (last10.length !== 10) return null
+  const auth = Buffer.from(`${keyId}:${keySecret}`).toString('base64')
+  const from = Math.floor(Date.now() / 1000) - windowMins * 60
+  const res = await fetch(`https://api.razorpay.com/v1/payments?count=100&from=${from}`, {
+    headers: { Authorization: `Basic ${auth}` },
+  })
+  if (!res.ok) return null
+  const j = await res.json()
+  const match = (j.items || []).find(
+    (p) =>
+      (p.status === 'captured' || p.status === 'authorized') &&
+      String(p.contact || '').replace(/\D/g, '').slice(-10) === last10,
+  )
+  if (!match) return null
+  // capture it if it's only authorized (manual-capture accounts)
+  if (match.status === 'authorized') {
+    await fetch(`https://api.razorpay.com/v1/payments/${match.id}/capture`, {
+      method: 'POST',
+      headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount: match.amount, currency: match.currency }),
+    }).catch(() => {})
+  }
+  return { paymentId: match.id, amount: match.amount }
+}
+
 // Verify the payment signature from Razorpay checkout. Mock mode always passes.
 export function verifyPayment({ orderId, paymentId, signature }) {
   if (mode === 'mock' || !keySecret) return true
