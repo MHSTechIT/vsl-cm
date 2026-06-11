@@ -1,5 +1,4 @@
 import { doctor } from '../content.js'
-import { ImagePlaceholder } from './Placeholder.jsx'
 
 // SECTION 5 — about the doctor
 export default function AboutDoctor() {
@@ -7,10 +6,11 @@ export default function AboutDoctor() {
     <section className="wrap" id="about">
       <h2>{doctor.heading}</h2>
 
-      {/* PHASE 2/3: real group photo goes here */}
-      <ImagePlaceholder
-        label="[Group photo — Doctor Farmer with students / award]"
+      <img
         className="doctor-photo"
+        src="/award.jpg"
+        alt="Doctor Farmer receiving an award with his students"
+        loading="lazy"
       />
 
       {doctor.paragraphs.map((para, i) => (

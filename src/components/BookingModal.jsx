@@ -6,6 +6,60 @@ function fmtDate(iso) {
   const d = new Date(iso + 'T00:00:00')
   return d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
 }
+
+// ---- Monthly calendar: only dates with open seats are clickable; the rest
+// look embedded (recessed) so visitors instantly read them as unavailable.
+const BK_WEEKDAYS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']
+const pad2 = (n) => String(n).padStart(2, '0')
+
+function SlotCalendar({ availableDates, selected, onPick }) {
+  const avail = new Set(availableDates)
+  const base = selected || availableDates[0]
+  const d0 = base ? new Date(base + 'T00:00:00') : new Date()
+  const [view, setView] = useState({ y: d0.getFullYear(), m: d0.getMonth() })
+
+  const iso = (y, m, d) => `${y}-${pad2(m + 1)}-${pad2(d)}`
+  const firstWd = (new Date(view.y, view.m, 1).getDay() + 6) % 7 // Monday-first
+  const days = new Date(view.y, view.m + 1, 0).getDate()
+  const label = new Date(view.y, view.m, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' })
+  const move = (delta) => {
+    let m = view.m + delta, y = view.y
+    if (m < 0) { m = 11; y -= 1 } else if (m > 11) { m = 0; y += 1 }
+    setView({ y, m })
+  }
+  const cells = []
+  for (let i = 0; i < firstWd; i++) cells.push(null)
+  for (let d = 1; d <= days; d++) cells.push(d)
+
+  return (
+    <div className="bk-cal">
+      <div className="bk-cal-head">
+        <button type="button" className="bk-cal-nav" onClick={() => move(-1)} aria-label="Previous month">‹</button>
+        <span className="bk-cal-month">{label}</span>
+        <button type="button" className="bk-cal-nav" onClick={() => move(1)} aria-label="Next month">›</button>
+      </div>
+      <div className="bk-cal-grid">
+        {BK_WEEKDAYS.map((w) => <span key={w} className="bk-cal-wd">{w}</span>)}
+        {cells.map((d, i) => {
+          if (!d) return <span key={`b${i}`} />
+          const dISO = iso(view.y, view.m, d)
+          const ok = avail.has(dISO)
+          return (
+            <button
+              key={dISO}
+              type="button"
+              disabled={!ok}
+              className={`bk-day ${ok ? 'is-avail' : ''} ${dISO === selected ? 'is-sel' : ''}`}
+              onClick={() => onPick(dISO)}
+            >
+              {d}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 function loadRazorpay() {
   return new Promise((resolve) => {
     if (window.Razorpay) return resolve(true)
@@ -27,18 +81,22 @@ export default function BookingModal({ onClose }) {
   const [times, setTimes] = useState([])
   const [time, setTime] = useState('')
 
-  const [status, setStatus] = useState('form') // form | paying | done
+  const [status, setStatus] = useState('form') // form | paying | done | failed
   const [err, setErr] = useState('')
   const [confirmed, setConfirmed] = useState(null) // {date,time}
   const [secsLeft, setSecsLeft] = useState(0)
+  const [paymentLink, setPaymentLink] = useState(null) // hosted rzp.io page, if configured
   const holdTimer = useRef(null)
   const pollTimer = useRef(null)
   const rzpRef = useRef(null)
   const doneRef = useRef(false)
+  const linkModeRef = useRef(false)
+  const payingPhone = useRef('')
 
-  // load available dates on open
+  // load available dates + config (payment link) on open
   useEffect(() => {
     api.slotDates().then(setDates).catch(() => setErr('Could not load dates.'))
+    api.config().then((c) => setPaymentLink(c?.paymentLink || null)).catch(() => {})
     return () => {
       clearInterval(holdTimer.current)
       clearInterval(pollTimer.current)
@@ -52,7 +110,12 @@ export default function BookingModal({ onClose }) {
     clearInterval(pollTimer.current)
     let ticks = 0
     pollTimer.current = setInterval(async () => {
-      if (++ticks > 180) return clearInterval(pollTimer.current) // give up after ~15 min
+      if (++ticks > 180) {
+        // ~15 min with no confirmed payment → treat as failed/timed-out
+        clearInterval(pollTimer.current)
+        if (linkModeRef.current) fail("We didn't receive your payment. Please try again.")
+        return
+      }
       try {
         const s = await api.paymentStatus(phone, orderId)
         if (s.paid) {
@@ -79,10 +142,35 @@ export default function BookingModal({ onClose }) {
     const tick = () => {
       const left = Math.max(0, Math.round((new Date(expiresAtIso) - new Date()) / 1000))
       setSecsLeft(left)
-      if (left <= 0) clearInterval(holdTimer.current)
+      if (left <= 0) {
+        clearInterval(holdTimer.current)
+        // hosted-link payer ran out the hold window without a confirmed payment
+        if (linkModeRef.current && !doneRef.current) {
+          fail('Your slot hold expired before payment came through. Please book again.')
+        }
+      }
     }
     tick()
     holdTimer.current = setInterval(tick, 1000)
+  }
+
+  function fail(reason) {
+    if (doneRef.current) return // a real confirmation already won
+    clearInterval(holdTimer.current)
+    clearInterval(pollTimer.current)
+    setErr(reason || '')
+    setStatus('failed')
+  }
+
+  // Reset back to the form so the payer can retry.
+  function retry() {
+    doneRef.current = false
+    linkModeRef.current = false
+    clearInterval(holdTimer.current)
+    clearInterval(pollTimer.current)
+    setErr('')
+    setSecsLeft(0)
+    setStatus('form')
   }
 
   async function confirmAndPay() {
@@ -91,6 +179,12 @@ export default function BookingModal({ onClose }) {
       setErr('Please enter your details and pick a date + time.')
       return
     }
+
+    // Hosted-link mode: open a blank tab NOW (inside the click) so the browser
+    // doesn't block it after our async calls; we point it at the link below.
+    let payWin = null
+    if (paymentLink) payWin = window.open('', '_blank')
+
     setStatus('paying')
     try {
       // ensure the lead exists (Form 2 may be the first touch for warm traffic)
@@ -102,7 +196,20 @@ export default function BookingModal({ onClose }) {
       const slotId = hold.slotId
       startHoldCountdown(hold.holdExpiresAt)
 
-      // create the ₹99 order
+      // ── Hosted Razorpay page ──────────────────────────────────────────────
+      // Seat is held + lead saved. Send the payer to the hosted page; the
+      // webhook matches the payment back by the phone they enter and confirms
+      // the booking. We poll /status so THIS page flips to "confirmed" too.
+      if (paymentLink) {
+        linkModeRef.current = true
+        payingPhone.current = saved
+        startPaymentPoll(saved) // no order id — webhook sets `paid`, poll reads it
+        if (payWin) payWin.location.href = paymentLink
+        else window.open(paymentLink, '_blank')
+        return
+      }
+
+      // create the ₹50 order (Checkout-popup path)
       const order = await api.createOrder(saved)
 
       if (order.mock) {
@@ -120,7 +227,7 @@ export default function BookingModal({ onClose }) {
         currency: order.currency,
         order_id: order.orderId,
         name: 'My Health School',
-        description: 'Health assessment — ₹99',
+        description: 'Health assessment — ₹50',
         prefill: { name: name.trim(), contact: saved },
         theme: { color: '#6d28d9' },
         handler: async (resp) => {
@@ -145,8 +252,21 @@ export default function BookingModal({ onClose }) {
       rzp.open()
       startPaymentPoll(saved, order.orderId)
     } catch (e) {
+      try { payWin?.close() } catch { /* ignore */ }
       setErr(e.message || 'Booking failed. Please try again.')
       setStatus('form')
+    }
+  }
+
+  // Manual "I've paid" re-check for the hosted-link flow.
+  async function recheckPayment() {
+    setErr('')
+    try {
+      const s = await api.paymentStatus(payingPhone.current)
+      if (s.paid) finish({ date: s.date, time: s.time })
+      else setErr('Not confirmed yet — give it a few seconds after paying, then check again.')
+    } catch {
+      setErr('Could not check just now — try again in a moment.')
     }
   }
 
@@ -167,7 +287,7 @@ export default function BookingModal({ onClose }) {
         {status === 'done' ? (
           <div className="booking-done">
             <div className="booking-tick" aria-hidden="true">✓</div>
-            <h3>Slot confirmed</h3>
+            <h3>Payment successful — slot confirmed</h3>
             <p>
               Your health assessment is booked for <strong>{fmtDate(confirmed.date)}</strong> at{' '}
               <strong>{confirmed.time}</strong>.
@@ -175,9 +295,22 @@ export default function BookingModal({ onClose }) {
             <p className="caption">Our team will call you. A confirmation has been sent on WhatsApp.</p>
             <button className="cta" onClick={onClose}>Done</button>
           </div>
+        ) : status === 'failed' ? (
+          <div className="booking-done booking-failed">
+            <div className="booking-tick booking-cross" aria-hidden="true">✕</div>
+            <h3>Payment not completed</h3>
+            <p>{err || "We couldn't confirm your payment."}</p>
+            <p className="caption">
+              If money was deducted, it will auto-refund — or message us and we'll sort it out.
+            </p>
+            <div className="pay-wait-actions">
+              <button className="cta" onClick={retry}>Try again</button>
+              <button className="cta cta-ghost" onClick={onClose}>Close</button>
+            </div>
+          </div>
         ) : (
           <>
-            <h3 className="modal-title">Book your ₹99 health assessment</h3>
+            <h3 className="modal-title">Book your ₹50 health assessment</h3>
 
             <input
               className="reg-input"
@@ -195,35 +328,36 @@ export default function BookingModal({ onClose }) {
             />
 
             <p className="modal-label">Select a date</p>
-            <div className="chip-row">
-              {dates.length === 0 && <span className="caption">No dates open right now.</span>}
-              {dates.map((d) => (
-                <button
-                  key={d.date}
-                  className={`chip ${date === d.date ? 'chip-active' : ''}`}
-                  onClick={() => pickDate(d.date)}
-                >
-                  {fmtDate(d.date)}
-                </button>
-              ))}
-            </div>
+            {dates.length === 0 ? (
+              <p className="caption">No dates open right now.</p>
+            ) : (
+              <SlotCalendar
+                availableDates={dates.map((d) => d.date)}
+                selected={date}
+                onPick={pickDate}
+              />
+            )}
 
             {date && (
               <>
-                <p className="modal-label">Select a time</p>
-                <div className="chip-row">
-                  {times.length === 0 && <span className="caption">No times for this date.</span>}
-                  {times.map((t) => (
-                    <button
-                      key={t.time}
-                      className={`chip ${time === t.time ? 'chip-active' : ''}`}
-                      onClick={() => setTime(t.time)}
-                      disabled={t.left <= 0}
-                    >
-                      {t.time}
-                      {t.left <= 0 && <span className="chip-full"> · full</span>}
-                    </button>
-                  ))}
+                <p className="modal-label">Select a time — {fmtDate(date)}</p>
+                <div className="bk-slots">
+                  {times.length === 0 && <span className="caption">Loading times…</span>}
+                  {times.map((t) => {
+                    const full = t.left <= 0
+                    return (
+                      <button
+                        key={t.time}
+                        type="button"
+                        disabled={full}
+                        className={`bk-slot ${full ? 'is-booked' : ''} ${time === t.time ? 'is-sel' : ''}`}
+                        onClick={() => setTime(t.time)}
+                      >
+                        <span className="bk-slot-time">{t.time}</span>
+                        <span className="bk-slot-sub">{full ? 'Booked' : 'Available'}</span>
+                      </button>
+                    )
+                  })}
                 </div>
               </>
             )}
@@ -236,13 +370,30 @@ export default function BookingModal({ onClose }) {
             )}
             {err && <p className="reg-error">{err}</p>}
 
-            <button
-              className="cta"
-              onClick={confirmAndPay}
-              disabled={!time || status === 'paying'}
-            >
-              {status === 'paying' ? 'Processing…' : 'Confirm my slot — pay ₹99'}
-            </button>
+            {status === 'paying' && paymentLink ? (
+              <div className="pay-wait">
+                <p>
+                  Complete the ₹50 payment in the Razorpay tab — <strong>use this same
+                  phone number</strong>. This page confirms automatically once it's paid.
+                </p>
+                <div className="pay-wait-actions">
+                  <a className="cta" href={paymentLink} target="_blank" rel="noopener noreferrer">
+                    Open payment page
+                  </a>
+                  <button className="cta cta-ghost" type="button" onClick={recheckPayment}>
+                    I've paid — check now
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                className="cta"
+                onClick={confirmAndPay}
+                disabled={!time || status === 'paying'}
+              >
+                {status === 'paying' ? 'Processing…' : 'Confirm my slot — pay ₹50'}
+              </button>
+            )}
           </>
         )}
       </div>

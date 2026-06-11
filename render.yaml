@@ -26,7 +26,7 @@ services:
       - key: RAZORPAY_WEBHOOK_SECRET
         sync: false
       - key: PRICE_PAISE
-        value: "9900"
+        value: "5000"
       - key: WHAPI_TOKEN
         sync: false
       - key: WHAPI_BASE_URL

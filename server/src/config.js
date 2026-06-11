@@ -17,7 +17,11 @@ export const config = {
     keyId: process.env.RAZORPAY_KEY_ID || '',
     keySecret: process.env.RAZORPAY_KEY_SECRET || '',
     webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || '',
-    pricePaise: Number(process.env.PRICE_PAISE) || 9900,
+    pricePaise: Number(process.env.PRICE_PAISE) || 5000,
+    // Optional Razorpay-hosted payment page (rzp.io/...). When set, the booking
+    // flow sends payers here instead of opening the Checkout popup — useful
+    // while the site domain is still under Razorpay review.
+    paymentLink: process.env.RAZORPAY_PAYMENT_LINK || '',
   },
 
   whapi: {

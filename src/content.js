@@ -16,7 +16,7 @@ export const hero = {
     'Watch the full video before you do anything else. What Doctor Farmer reveals here, most doctors will never tell you in a 7-minute consultation.',
 }
 
-export const ctaLabel = 'Book my health assessment — ₹99'
+export const ctaLabel = 'Book my health assessment — ₹50'
 
 export const primaryCta = {
   riskLine:
@@ -100,8 +100,8 @@ export const faq = {
       a: 'No. Our people still eat rice and Tamil food. What changes is the timing and structure — not the culture.',
     },
     {
-      q: 'What happens on the ₹99 assessment call?',
-      a: "The Doctor's senior health advisor will understand your situation — your sugar levels, your history, your daily life — and tell you honestly whether the program fits you. If it does, they explain how to start. If it doesn't, they tell you that, and your ₹99 is refunded.",
+      q: 'What happens on the ₹50 assessment call?',
+      a: "The Doctor's senior health advisor will understand your situation — your sugar levels, your history, your daily life — and tell you honestly whether the program fits you. If it does, they explain how to start. If it doesn't, they tell you that, and your ₹50 is refunded.",
     },
   ],
 }

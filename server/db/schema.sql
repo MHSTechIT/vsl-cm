@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS leads (
   paid             BOOLEAN NOT NULL DEFAULT false,
   paid_at          TIMESTAMPTZ,
   rzp_order_id     TEXT,                      -- last Razorpay order, for server-side reconciliation
+  rzp_payment_id   TEXT,                      -- captured payment id (used to match refunds back)
+  refunded_at      TIMESTAMPTZ,               -- set when a refund webhook arrives
 
   -- WhatsApp automation queue (used when Whapi token is absent / for review)
   needs_wa         TEXT,                      -- 'rescue' | 'confirmation' | null
@@ -38,10 +40,11 @@ CREATE TABLE IF NOT EXISTS slots (
   id               SERIAL PRIMARY KEY,
   slot_date        DATE NOT NULL,
   slot_time        TEXT NOT NULL,             -- e.g. "18:00"
-  status           TEXT NOT NULL DEFAULT 'available', -- available | pending | confirmed
+  status           TEXT NOT NULL DEFAULT 'available', -- available | pending | confirmed | blocked
   held_by_phone    TEXT,
   hold_expires_at  TIMESTAMPTZ,
   lead_phone       TEXT,                      -- owner once confirmed
+  release_wave     INTEGER,                   -- blocked seats: 1 = opens after 5 payments, 2 = after 10
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (slot_date, slot_time)
 );
@@ -77,6 +80,37 @@ CREATE TABLE IF NOT EXISTS testimonials (
 );
 ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS image_id INTEGER;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS rzp_order_id TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS rzp_payment_id TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS refunded_at TIMESTAMPTZ;
+ALTER TABLE slots ADD COLUMN IF NOT EXISTS release_wave INTEGER;
+
+-- Idempotency log — Razorpay retries webhooks; the unique (source,event_id)
+-- gate stops the same event from being processed twice.
+CREATE TABLE IF NOT EXISTS webhook_events (
+  id           SERIAL PRIMARY KEY,
+  source       TEXT NOT NULL,
+  event_id     TEXT NOT NULL,
+  event_type   TEXT NOT NULL,
+  processed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (source, event_id)
+);
+
+-- Never lose a payment: a captured payment we can't match to a lead lands
+-- here for manual reconcile instead of vanishing.
+CREATE TABLE IF NOT EXISTS unmatched_payments (
+  id              SERIAL PRIMARY KEY,
+  payment_id      TEXT NOT NULL UNIQUE,
+  order_id        TEXT,
+  amount          NUMERIC NOT NULL DEFAULT 0,
+  currency        TEXT NOT NULL DEFAULT 'INR',
+  payer_email     TEXT,
+  payer_phone     TEXT,
+  notes           JSONB,
+  raw_payload     JSONB NOT NULL,
+  received_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved        BOOLEAN NOT NULL DEFAULT false,
+  resolved_at     TIMESTAMPTZ
+);
 
 CREATE INDEX IF NOT EXISTS idx_slots_date ON slots (slot_date);
 CREATE INDEX IF NOT EXISTS idx_slots_status ON slots (status);

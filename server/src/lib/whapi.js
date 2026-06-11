@@ -38,7 +38,7 @@ export async function sendWhatsApp(phone, message, kind /* 'rescue' | 'confirmat
 }
 
 export const rescueMessage = () =>
-  'Your slot is still held for a few more minutes. Complete your ₹99 booking here to confirm it.'
+  'Your slot is still held for a few more minutes. Complete your ₹50 booking here to confirm it.'
 
 export const confirmationMessage = (date, time) =>
   `✅ Your health assessment is booked for ${date} at ${time}. Our team will call you. — My Health School`

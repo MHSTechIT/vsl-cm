@@ -69,6 +69,7 @@ app.get(
       videoUrl: s.video_id ? `/media/${s.video_id}` : null,
       thumbUrl: s.thumb_id ? `/media/${s.thumb_id}` : null,
       revealSeconds: s.reveal_seconds != null ? Number(s.reveal_seconds) : 900,
+      paymentLink: config.razorpay.paymentLink || null,
     })
   }),
 )

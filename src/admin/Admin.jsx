@@ -140,11 +140,14 @@ function DatePicker({ value, onChange }) {
 // ---------- Login ----------
 function Login({ onIn }) {
   const [tok, setTok] = useState('')
+  const [show, setShow] = useState(false)
   const [err, setErr] = useState('')
+  const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   async function submit(e) {
     e.preventDefault()
     setErr('')
+    setNote('')
     setBusy(true)
     setToken(tok.trim())
     try {
@@ -158,20 +161,60 @@ function Login({ onIn }) {
   }
   return (
     <div className="adm-login-wrap">
+      <img className="adm-logo" src="/favicon.png" alt="My Health School" />
       <form className="adm-login" onSubmit={submit}>
-        <img className="adm-logo" src="/favicon.png" alt="My Health School" />
-        <h1>Admin panel</h1>
-        <p className="adm-login-sub">Enter your password to continue</p>
-        <input
-          type="password"
-          placeholder="Password"
-          autoFocus
-          autoComplete="current-password"
-          value={tok}
-          onChange={(e) => setTok(e.target.value)}
-        />
+        <div className="adm-login-head">
+          <h1>Super Admin Sign In</h1>
+          <span className="adm-chip">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+              strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 3l7 2.5V11c0 4.4-3 8.4-7 9.5-4-1.1-7-5.1-7-9.5V5.5L12 3z" />
+            </svg>
+            ADMIN
+          </span>
+        </div>
+
+        <div className="adm-pass">
+          <input
+            type={show ? 'text' : 'password'}
+            placeholder="Password"
+            autoFocus
+            autoComplete="current-password"
+            value={tok}
+            onChange={(e) => setTok(e.target.value)}
+          />
+          <button
+            type="button"
+            className="adm-eye"
+            onClick={() => setShow((s) => !s)}
+            aria-label={show ? 'Hide password' : 'Show password'}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+              strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" />
+              <circle cx="12" cy="12" r="3" />
+              {show && <line x1="4" y1="4" x2="20" y2="20" />}
+            </svg>
+          </button>
+        </div>
+
         {err && <p className="adm-err">{err}</p>}
-        <button type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+        {note && <p className="adm-note">{note}</p>}
+
+        <button type="submit" className="adm-signin" disabled={busy}>
+          {busy ? 'Signing in…' : 'Sign In →'}
+        </button>
+
+        <div className="adm-login-foot">
+          <button
+            type="button"
+            className="adm-forgot"
+            onClick={() => setNote('Contact the site owner to reset the admin password.')}
+          >
+            Forgot password?
+          </button>
+          <a className="adm-back" href="/">← Back to user login</a>
+        </div>
       </form>
     </div>
   )
@@ -193,29 +236,16 @@ function Dashboard() {
 
       {s && (
         <>
-          <div className="adm-cards">
-            <Stat variant="purple" value={s.registered} label="Registered to watch" tag="ALL" />
-            <Stat variant="amber" value={s.watch.m15} label="Watched 75%+" />
-            <Stat variant="blue" value={s.form2} label="Form 2 filled" />
-            <Stat variant="green" value={s.paid} label="Paid ₹99" />
-          </div>
-
           <div className="adm-block">
             <h2 className="adm-h2">Drop-off funnel</h2>
-            {[
-              { label: 'Registered', n: s.registered, of: s.registered },
-              { label: 'Watched 75%+', n: s.watch.m15, of: s.registered },
-              { label: 'Form 2 filled', n: s.form2, of: s.watch.m15 },
-              { label: 'Paid ₹99', n: s.paid, of: s.form2 },
-            ].map((f, i) => (
-              <div className="adm-funnel-row" key={f.label}>
-                <span className="adm-funnel-label">{f.label}</span>
-                <div className="adm-bar">
-                  <div className="adm-bar-fill" style={{ width: `${(f.n / Math.max(s.registered, 1)) * 100}%` }} />
-                </div>
-                <span className="adm-funnel-num">{f.n} <em>{i === 0 ? '100%' : pct(f.n, f.of)}</em></span>
-              </div>
-            ))}
+            <FunnelPie
+              stages={[
+                { label: 'Registered', n: s.registered, of: s.registered, color: '#7c3aed' },
+                { label: 'Watched 75%+', n: s.watch.m15, of: s.registered, color: '#f59e0b' },
+                { label: 'Form 2 filled', n: s.form2, of: s.watch.m15, color: '#2563eb' },
+                { label: 'Paid ₹50', n: s.paid, of: s.form2, color: '#059669' },
+              ]}
+            />
           </div>
 
           <div className="adm-block">
@@ -239,6 +269,73 @@ const Stat = ({ variant, value, label, tag }) => (
     <div className="adm-stat-label">{label}</div>
   </div>
 )
+
+// Funnel as a donut: slices sized by lead count (share-of-total % inside each),
+// with the funnel conversion-% (vs the previous stage) shown in the legend.
+function FunnelPie({ stages }) {
+  const total = stages.reduce((sum, st) => sum + st.n, 0)
+  const cx = 120, cy = 120, r = 110, inner = 58
+  const toXY = (deg, radius) => {
+    const rad = ((deg - 90) * Math.PI) / 180
+    return [cx + radius * Math.cos(rad), cy + radius * Math.sin(rad)]
+  }
+  const live = stages.filter((st) => st.n > 0)
+  let angle = 0
+  const arcs = live.map((st) => {
+    const frac = st.n / total
+    const start = angle
+    const end = angle + frac * 360
+    angle = end
+    const mid = (start + end) / 2
+    const [lx, ly] = toXY(mid, (r + inner) / 2)
+    const full = frac >= 0.9999
+    let d
+    if (full) {
+      // single full ring — draw it as two half-arcs so the donut closes
+      const [ox, oy] = toXY(0, r); const [ix, iy] = toXY(0, inner)
+      d = `M ${ox} ${oy} A ${r} ${r} 0 1 1 ${ox - 0.01} ${oy} Z `
+        + `M ${ix} ${iy} A ${inner} ${inner} 0 1 0 ${ix - 0.01} ${iy} Z`
+    } else {
+      const [ox1, oy1] = toXY(start, r)
+      const [ox2, oy2] = toXY(end, r)
+      const [ix2, iy2] = toXY(end, inner)
+      const [ix1, iy1] = toXY(start, inner)
+      const large = frac > 0.5 ? 1 : 0
+      d = `M ${ox1} ${oy1} A ${r} ${r} 0 ${large} 1 ${ox2} ${oy2} `
+        + `L ${ix2} ${iy2} A ${inner} ${inner} 0 ${large} 0 ${ix1} ${iy1} Z`
+    }
+    return { ...st, d, lx, ly, share: Math.round(frac * 100), fillRule: full ? 'evenodd' : 'nonzero' }
+  })
+
+  if (!total) return <p className="adm-empty">No leads yet.</p>
+
+  return (
+    <div className="adm-pie">
+      <svg viewBox="0 0 240 240" className="adm-pie-svg" role="img" aria-label="Funnel breakdown">
+        {arcs.map((a) => (
+          <path key={a.label} d={a.d} fill={a.color} fillRule={a.fillRule} stroke="#fff" strokeWidth="2" />
+        ))}
+        {arcs.filter((a) => a.share >= 7).map((a) => (
+          <text key={a.label} x={a.lx} y={a.ly} className="adm-pie-pct"
+            textAnchor="middle" dominantBaseline="central">{a.share}%</text>
+        ))}
+        <text x={cx} y={cy - 8} textAnchor="middle" className="adm-pie-center-num">{total}</text>
+        <text x={cx} y={cy + 12} textAnchor="middle" className="adm-pie-center-label">touchpoints</text>
+      </svg>
+
+      <div className="adm-pie-legend">
+        {stages.map((st, i) => (
+          <div className="adm-pie-leg" key={st.label}>
+            <span className="adm-pie-dot" style={{ background: st.color }} />
+            <span className="adm-pie-leg-label">{st.label}</span>
+            <span className="adm-pie-leg-num">{st.n}</span>
+            <span className="adm-pie-leg-conv">{i === 0 ? '100%' : pct(st.n, st.of)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 // ---------- Leads ----------
 function Leads() {
@@ -317,8 +414,8 @@ function Leads() {
             {filtered.map((r) => (
               <tr key={r.phone}>
                 <td className="adm-strong">{r.name}</td>
-                <td>{r.phone}</td>
-                <td>{r.watch_percent}%</td>
+                <td className="adm-mono">{r.phone}</td>
+                <td className="adm-mono">{r.watch_percent}%</td>
                 <td>{r.form2_submitted ? <Pill c="blue">Yes</Pill> : <span className="adm-dash">—</span>}</td>
                 <td>{r.slot_date ? `${fmtDate(r.slot_date)} · ${r.slot_time}` : <span className="adm-dash">—</span>}</td>
                 <td>
@@ -349,10 +446,68 @@ const fmtDot = (iso) => {
   return `${d}.${m}.${y}`
 }
 
+// One release group ("1st release" / "2nd release") of fake-booked slots.
+// Chips can be moved to the other wave, opened immediately, and open slots
+// can be blocked into this wave — full admin control over the drip order.
+function ReleaseCard({ title, sub, slots, openSlots, moveLabel, onMove, onUnblock, onBlock }) {
+  const [adding, setAdding] = useState(false)
+  return (
+    <div className="rel-card">
+      <div className="rel-head">
+        <h4>{title}</h4>
+        <span>{sub}</span>
+      </div>
+      <div className="rel-chips">
+        {slots.length === 0 && <span className="rel-empty">no slots held back</span>}
+        {slots.map((s) => (
+          <span className="rel-chip" key={s.time}>
+            <span className="rel-time">{s.time}{s.count > 1 ? ` ×${s.count}` : ''}</span>
+            <button className="rel-act" title={`Move to ${moveLabel}`} onClick={() => onMove(s.time)}>
+              {moveLabel}
+            </button>
+            <button className="rel-act rel-open" title="Open for booking now" onClick={() => onUnblock(s.time)}>
+              open
+            </button>
+          </span>
+        ))}
+      </div>
+      <div className="rel-addwrap">
+        {adding ? (
+          <div className="rel-addlist">
+            {openSlots.length === 0 && <span className="rel-empty">no open slots to block</span>}
+            {openSlots.map((s) => (
+              <button key={s.time} className="rel-addopt" onClick={() => { onBlock(s.time); setAdding(false) }}>
+                {s.time}
+              </button>
+            ))}
+            <button className="rel-cancel" onClick={() => setAdding(false)}>cancel</button>
+          </div>
+        ) : (
+          <button className="rel-add" onClick={() => setAdding(true)}>+ block a slot into this release</button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Default day plan: twenty half-hour slots, 10.00am → 8.00pm.
+function halfHourPreset(startHour = 10, endHour = 20) {
+  const fmt = (h, m) => {
+    const ap = h < 12 || h === 24 ? 'am' : 'pm'
+    const hh = h % 12 === 0 ? 12 : h % 12
+    return `${hh}.${m === 0 ? '00' : '30'}${ap}`
+  }
+  const out = []
+  for (let h = startHour; h < endHour; h++) {
+    out.push(`${fmt(h, 0)}-${fmt(h, 30)}`)
+    out.push(`${fmt(h, 30)}-${fmt(h + 1, 0)}`)
+  }
+  return out
+}
+
 function Slots() {
   const [groups, setGroups] = useState([])
   const [date, setDate] = useState('')
-  const [times, setTimes] = useState('8.00am-9.00am, 9.00am-10.00am, 10.00am-11.00am')
   const [msg, setMsg] = useState('')
   const [seatEdit, setSeatEdit] = useState(null) // { date, time }
   const [seatVal, setSeatVal] = useState('')
@@ -362,9 +517,17 @@ function Slots() {
   async function openDate(e) {
     e.preventDefault()
     setMsg('')
-    const list = times.split(',').map((t) => t.trim()).filter(Boolean)
-    if (!date || !list.length) return setMsg('Pick a date and at least one time slot.')
-    try { await adminApi.openDate(date, list); setMsg(`Opened ${list.length} slot(s).`); load() }
+    const list = halfHourPreset() // fixed day plan — only the date is chosen
+    if (!date) return setMsg('Pick a date first.')
+    try {
+      const r = await adminApi.openDate(date, list)
+      setMsg(
+        r.created
+          ? `Opened ${r.created} seat(s) — ${r.blocked} shown as booked, released as payments come in.`
+          : 'Those time slots are already open (day is at its 20-seat cap).',
+      )
+      load()
+    }
     catch (e2) { setMsg(e2.message) }
   }
   function openSeats(d, s) {
@@ -390,6 +553,13 @@ function Slots() {
   const chipClass = (s) =>
     s.available > 0 ? 'available' : s.confirmed >= s.capacity ? 'confirmed' : 'pending'
 
+  async function moveWave(d, time, wave) { await adminApi.setWave(d, time, wave); load() }
+  async function unblock(d, time) { await adminApi.unblockSlot(d, time); load() }
+  async function block(d, time, wave) {
+    try { await adminApi.blockSlot(d, time, wave); load() }
+    catch (e2) { setMsg(e2.message) }
+  }
+
   return (
     <section className="adm-panel">
       <div className="adm-panel-head">
@@ -398,7 +568,9 @@ function Slots() {
 
       <form className="adm-openslot" onSubmit={openDate}>
         <DatePicker value={date} onChange={setDate} />
-        <input type="text" value={times} onChange={(e) => setTimes(e.target.value)} placeholder="time slots, comma separated" />
+        <span className="adm-openslot-note">
+          20 half-hour slots · 10.00am – 8.00pm · 10 open, 10 shown as booked
+        </span>
         <button className="adm-btn adm-btn-primary" type="submit">+ Open date</button>
       </form>
       {msg && <p className="adm-msg">{msg}</p>}
@@ -418,7 +590,10 @@ function Slots() {
                 title="Click to set total seats"
               >
                 <span className="slot-time">{s.time}</span>
-                <span className="slot-seats">{s.available}/{s.capacity} left</span>
+                <span className="slot-seats">
+                  {s.available}/{s.capacity} left
+                  {s.blocked > 0 && <em className="slot-blocked"> · {s.blocked} shown booked</em>}
+                </span>
                 <span
                   className="slot-x"
                   onClick={(e) => { e.stopPropagation(); removeTime(g.date, s.time) }}
@@ -426,6 +601,29 @@ function Slots() {
                 >×</span>
               </button>
             ))}
+          </div>
+
+          <div className="slot-releases">
+            <ReleaseCard
+              title="1st release"
+              sub="opens after 5 payments"
+              slots={g.slots.filter((s) => s.wave1 > 0).map((s) => ({ time: s.time, count: s.wave1 }))}
+              openSlots={g.slots.filter((s) => s.available > 0)}
+              moveLabel="→ 2nd"
+              onMove={(t) => moveWave(g.date, t, 2)}
+              onUnblock={(t) => unblock(g.date, t)}
+              onBlock={(t) => block(g.date, t, 1)}
+            />
+            <ReleaseCard
+              title="2nd release"
+              sub="opens after 10 payments"
+              slots={g.slots.filter((s) => s.wave2 > 0).map((s) => ({ time: s.time, count: s.wave2 }))}
+              openSlots={g.slots.filter((s) => s.available > 0)}
+              moveLabel="→ 1st"
+              onMove={(t) => moveWave(g.date, t, 1)}
+              onUnblock={(t) => unblock(g.date, t)}
+              onBlock={(t) => block(g.date, t, 2)}
+            />
           </div>
         </div>
       ))}
@@ -627,7 +825,7 @@ function TestimonialManager() {
   }
 
   return (
-    <div className="up-cardgrid">
+    <div className="up-cardgrid up-cardgrid--split">
       <div className="up-card up-card--wide">
         <h2 className="adm-h2">Proof cards</h2>
         <p className="adm-sub" style={{ marginTop: 0, marginBottom: 14 }}>
@@ -656,12 +854,27 @@ function TestimonialManager() {
           {status && !['saving', 'added'].includes(status) && <p className="reg-error">{status}</p>}
           {status === 'added' && <p className="adm-msg">Added ✓</p>}
         </form>
+      </div>
 
-        {list.length > 0 && (
+      <div className="up-card up-card--list">
+        <h2 className="adm-h2">Added cards ({list.length})</h2>
+        {list.length === 0 ? (
+          <p className="adm-sub" style={{ marginTop: 0 }}>No cards yet — add the first one on the left.</p>
+        ) : (
           <div className="tm-list">
             {list.map((t) => (
               <div className="tm-item" key={t.id}>
-                <span className="adm-strong">{t.name}</span>
+                {t.imageUrl ? (
+                  <img className="tm-thumb" src={abs(t.imageUrl)} alt="" />
+                ) : (
+                  <span className="tm-thumb tm-thumb--empty">📋</span>
+                )}
+                <div className="tm-meta">
+                  <span className="adm-strong">{t.name}</span>
+                  <span className="tm-stat">
+                    {t.statText || (t.statBefore && t.statAfter ? `HbA1c ${t.statBefore} → ${t.statAfter}` : '')}
+                  </span>
+                </div>
                 <button className="adm-link" onClick={() => del(t.id)}>delete</button>
               </div>
             ))}

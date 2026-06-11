@@ -57,7 +57,24 @@ export async function orderHasCapturedPayment(orderId) {
   })
   if (!res.ok) return false
   const j = await res.json()
-  return (j.items || []).some((p) => p.status === 'captured')
+  const items = j.items || []
+  if (items.some((p) => p.status === 'captured')) return true
+
+  // Money taken but stuck at 'authorized' (payment capture set to manual in
+  // the Razorpay dashboard) — capture it now, otherwise Razorpay auto-refunds
+  // it after a few days and the customer's booking silently dies.
+  const authorized = items.find((p) => p.status === 'authorized')
+  if (authorized) {
+    const cap = await fetch(`https://api.razorpay.com/v1/payments/${authorized.id}/capture`, {
+      method: 'POST',
+      headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount: authorized.amount, currency: authorized.currency }),
+    })
+    if (cap.ok) return true
+    // eslint-disable-next-line no-console
+    console.error(`[payment] capture failed for ${authorized.id} (${cap.status})`)
+  }
+  return false
 }
 
 // Verify the payment signature from Razorpay checkout. Mock mode always passes.

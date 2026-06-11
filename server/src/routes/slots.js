@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { query } from '../db.js'
 import { config } from '../config.js'
 import { releaseExpiredHolds } from '../lib/holds.js'
+import { applySlotDrip, applyDripAll } from '../lib/drip.js'
 import { ah } from '../lib/ah.js'
 
 export const slotsRouter = Router()
@@ -11,6 +12,7 @@ slotsRouter.get(
   '/dates',
   ah(async (_req, res) => {
     await releaseExpiredHolds()
+    await applyDripAll()
     const { rows } = await query(
       `SELECT slot_date,
               COUNT(*) FILTER (WHERE status = 'available') AS available
@@ -24,24 +26,27 @@ slotsRouter.get(
   }),
 )
 
-// Times for a date with seats left (full times return left:0 so the booking
-// form can show them disabled instead of hiding them).
+// Times for a date. `total` includes blocked/held/confirmed seats, so the
+// booking form shows them as already booked (left of total) — full times
+// return left:0 so they render disabled instead of hidden.
 slotsRouter.get(
   '/',
   ah(async (req, res) => {
     await releaseExpiredHolds()
     const date = String(req.query.date || '')
     if (!date) return res.status(400).json({ error: 'date required' })
+    await applySlotDrip(date)
     const { rows } = await query(
       `SELECT slot_time,
-              COUNT(*) FILTER (WHERE status='available') AS left
+              COUNT(*) FILTER (WHERE status='available') AS left,
+              COUNT(*) AS total
          FROM slots
         WHERE slot_date = $1
         GROUP BY slot_time
         ORDER BY MIN(id)`,
       [date],
     )
-    res.json(rows.map((r) => ({ time: r.slot_time, left: Number(r.left) })))
+    res.json(rows.map((r) => ({ time: r.slot_time, left: Number(r.left), total: Number(r.total) })))
   }),
 )
 

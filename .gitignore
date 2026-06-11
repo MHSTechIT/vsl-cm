@@ -7,3 +7,6 @@ dist
 # never commit secrets
 .env
 **/.env
+
+# original full-res source image — only the resized public/award.jpg ships
+/award.jpg

@@ -3,6 +3,7 @@ import multer from 'multer'
 import { query } from '../db.js'
 import { config } from '../config.js'
 import { releaseExpiredHolds } from '../lib/holds.js'
+import { applyDripAll, DAY_SEATS, DAY_OPEN } from '../lib/drip.js'
 import { isoDate } from './slots.js'
 import { ah } from '../lib/ah.js'
 import { setSetting, getSettings } from '../lib/settings.js'
@@ -68,6 +69,22 @@ adminRouter.get(
   }),
 )
 
+// Unmatched payments — captured money we couldn't tie to a lead. Ops reviews
+// these; > 0 rows means someone paid but isn't booked.
+adminRouter.get(
+  '/unmatched-payments',
+  ah(async (_req, res) => {
+    const { rows } = await query(
+      `SELECT id, payment_id, order_id, amount, currency, payer_email, payer_phone,
+              received_at, resolved
+         FROM unmatched_payments
+        WHERE resolved = false
+        ORDER BY received_at DESC`,
+    )
+    res.json(rows)
+  }),
+)
+
 // Clear a lead's WhatsApp flag (after the team sends it manually).
 adminRouter.post(
   '/leads/:phone/wa-sent',
@@ -86,12 +103,16 @@ adminRouter.get(
   '/slots',
   ah(async (_req, res) => {
     await releaseExpiredHolds()
+    await applyDripAll()
     const { rows } = await query(`
       SELECT slot_date, slot_time,
              COUNT(*)                                   AS capacity,
              COUNT(*) FILTER (WHERE status='available') AS available,
              COUNT(*) FILTER (WHERE status='pending')   AS pending,
-             COUNT(*) FILTER (WHERE status='confirmed') AS confirmed
+             COUNT(*) FILTER (WHERE status='confirmed') AS confirmed,
+             COUNT(*) FILTER (WHERE status='blocked')   AS blocked,
+             COUNT(*) FILTER (WHERE status='blocked' AND COALESCE(release_wave, 1) = 1) AS wave1,
+             COUNT(*) FILTER (WHERE status='blocked' AND release_wave = 2)              AS wave2
         FROM slots
        GROUP BY slot_date, slot_time
        ORDER BY slot_date, MIN(id)
@@ -106,6 +127,9 @@ adminRouter.get(
         available: Number(r.available),
         pending: Number(r.pending),
         confirmed: Number(r.confirmed),
+        blocked: Number(r.blocked),
+        wave1: Number(r.wave1),
+        wave2: Number(r.wave2),
       })
     }
     res.json([...byDate.entries()].map(([date, slots]) => ({ date, slots })))
@@ -168,7 +192,9 @@ adminRouter.post(
   }),
 )
 
-// Open a date: create slots for a list of times (skips existing).
+// Open a date. The day is topped up to DAY_SEATS seats spread evenly across
+// the NEW times — DAY_OPEN of the day's seats are bookable right away, the
+// rest are created 'blocked' (shown as booked; released by the payment drip).
 adminRouter.post(
   '/slots',
   ah(async (req, res) => {
@@ -177,20 +203,113 @@ adminRouter.post(
     if (!date || !times.length) return res.status(400).json({ error: 'date and times[] required' })
     if (times.length > 20) return res.status(400).json({ error: 'max 20 slots per day' })
 
-    // Create one seat per NEW time (skip times already opened for this date).
-    let created = 0
+    // Skip times already opened for this date.
+    const newTimes = []
     for (const t of times) {
       const time = String(t)
       const { rows } = await query(
         `SELECT 1 FROM slots WHERE slot_date=$1 AND slot_time=$2 LIMIT 1`,
         [date, time],
       )
-      if (!rows.length) {
-        await query(`INSERT INTO slots (slot_date, slot_time) VALUES ($1, $2)`, [date, time])
-        created++
+      if (!rows.length) newTimes.push(time)
+    }
+    if (!newTimes.length) return res.json({ ok: true, created: 0, blocked: 0 })
+
+    const { rows: ex } = await query(
+      `SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status='blocked') AS blocked
+         FROM slots WHERE slot_date = $1`,
+      [date],
+    )
+    const existing = Number(ex[0].total)
+    const toCreate = Math.max(0, DAY_SEATS - existing)
+    const blockedToCreate = Math.min(
+      toCreate,
+      Math.max(0, DAY_SEATS - DAY_OPEN - Number(ex[0].blocked)),
+    )
+
+    // Spread both the seats AND the blocked share proportionally over every
+    // time, so the "already booked" slots look organic (each time partially
+    // booked; with single-seat times they alternate through the day).
+    // Blocked seats alternate between release wave 1 (opens after 5
+    // payments) and wave 2 (after 10).
+    const N = newTimes.length
+    const per = (total, t) => Math.floor(((t + 1) * total) / N) - Math.floor((t * total) / N)
+    let blockedSoFar = 0
+    for (let t = 0; t < N; t++) {
+      const seatsHere = per(toCreate, t)
+      const blockedHere = Math.min(seatsHere, per(blockedToCreate, t))
+      for (let k = 0; k < seatsHere; k++) {
+        const blocked = k >= seatsHere - blockedHere
+        const wave = blocked ? (blockedSoFar++ % 2) + 1 : null
+        await query(
+          `INSERT INTO slots (slot_date, slot_time, status, release_wave) VALUES ($1, $2, $3, $4)`,
+          [date, newTimes[t], blocked ? 'blocked' : 'available', wave],
+        )
       }
     }
-    res.json({ ok: true, created })
+    res.json({ ok: true, created: toCreate, blocked: blockedToCreate })
+  }),
+)
+
+// Move one blocked seat at (date,time) to the given release wave (1 or 2).
+adminRouter.post(
+  '/slots/wave',
+  ah(async (req, res) => {
+    const date = String(req.body?.date || '')
+    const time = String(req.body?.time || '')
+    const wave = Number(req.body?.wave) === 2 ? 2 : 1
+    if (!date || !time) return res.status(400).json({ error: 'date and time required' })
+    const { rowCount } = await query(
+      `UPDATE slots SET release_wave = $3
+        WHERE id = (SELECT id FROM slots
+                     WHERE slot_date = $1 AND slot_time = $2 AND status = 'blocked'
+                       AND COALESCE(release_wave, 1) <> $3
+                     ORDER BY id LIMIT 1)
+        RETURNING id`,
+      [date, time, wave],
+    )
+    res.json({ ok: true, moved: rowCount })
+  }),
+)
+
+// Block one available seat at (date,time) into a release wave (fake-book it).
+adminRouter.post(
+  '/slots/block',
+  ah(async (req, res) => {
+    const date = String(req.body?.date || '')
+    const time = String(req.body?.time || '')
+    const wave = Number(req.body?.wave) === 2 ? 2 : 1
+    if (!date || !time) return res.status(400).json({ error: 'date and time required' })
+    const { rowCount } = await query(
+      `UPDATE slots SET status = 'blocked', release_wave = $3
+        WHERE id = (SELECT id FROM slots
+                     WHERE slot_date = $1 AND slot_time = $2 AND status = 'available'
+                     ORDER BY id LIMIT 1)
+        RETURNING id`,
+      [date, time, wave],
+    )
+    if (!rowCount) return res.status(409).json({ error: 'no open seat at that time' })
+    res.json({ ok: true })
+  }),
+)
+
+// Release one blocked seat at (date,time) for booking right now.
+adminRouter.post(
+  '/slots/unblock',
+  ah(async (req, res) => {
+    const date = String(req.body?.date || '')
+    const time = String(req.body?.time || '')
+    if (!date || !time) return res.status(400).json({ error: 'date and time required' })
+    const { rowCount } = await query(
+      `UPDATE slots SET status = 'available', release_wave = NULL
+        WHERE id = (SELECT id FROM slots
+                     WHERE slot_date = $1 AND slot_time = $2 AND status = 'blocked'
+                     ORDER BY id LIMIT 1)
+        RETURNING id`,
+      [date, time],
+    )
+    if (!rowCount) return res.status(409).json({ error: 'no blocked seat at that time' })
+    res.json({ ok: true })
   }),
 )
 

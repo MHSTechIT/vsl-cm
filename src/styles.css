@@ -378,7 +378,11 @@ p:last-child { margin-bottom: 0; }
 /* ============================================================
    ABOUT THE DOCTOR
    ============================================================ */
-.doctor-photo { width: 100%; height: 220px; margin-bottom: 22px; }
+.doctor-photo {
+  width: 100%; height: 220px; margin-bottom: 22px;
+  display: block; object-fit: cover; border-radius: 16px;
+  box-shadow: var(--shadow-soft);
+}
 
 /* ============================================================
    FAQ
@@ -631,6 +635,75 @@ p:last-child { margin-bottom: 0; }
   text-decoration: line-through;
 }
 .chip-full { text-decoration: none; font-size: 0.78rem; color: var(--muted); }
+.chip-left { font-size: 0.78rem; color: var(--muted); }
+.chip-active .chip-left { color: inherit; opacity: 0.85; }
+
+/* booking calendar — open dates pop, unavailable days look embedded */
+.bk-cal { border: 1px solid var(--line); border-radius: 14px; padding: 12px; background: #fff; }
+.bk-cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.bk-cal-month { font-weight: 700; color: var(--accent-deep); font-size: 0.95rem; }
+.bk-cal-nav {
+  border: none; background: var(--bg-soft); color: var(--accent);
+  width: 30px; height: 30px; border-radius: 9px; font-size: 1.2rem; line-height: 1; cursor: pointer;
+}
+.bk-cal-nav:hover { background: var(--accent); color: #fff; }
+.bk-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.bk-cal-wd {
+  text-align: center; font-size: 0.66rem; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.05em; padding: 4px 0;
+}
+.bk-day {
+  height: 38px; border-radius: 9px; border: 1.5px solid transparent;
+  font-family: inherit; font-size: 0.85rem; background: none; color: var(--muted);
+}
+.bk-day:disabled {
+  background: var(--bg-soft); color: #c3bcd8; font-weight: 500;
+  box-shadow: inset 0 1px 3px rgba(59, 28, 143, 0.08);
+  cursor: not-allowed;
+}
+.bk-day.is-avail {
+  background: #fff; border-color: var(--accent); color: var(--accent-deep);
+  font-weight: 700; cursor: pointer;
+}
+.bk-day.is-avail:hover { background: var(--bg-soft); }
+.bk-day.is-sel { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* time slot grid — booked/locked slots look embedded and unclickable */
+.bk-slots {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 8px; max-height: 250px; overflow-y: auto; padding: 2px;
+}
+.bk-slot {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 9px 6px; border-radius: 10px; border: 1.5px solid var(--line);
+  background: #fff; font-family: inherit; cursor: pointer;
+  transition: border-color 0.12s ease;
+}
+.bk-slot:hover:not(:disabled) { border-color: var(--accent); }
+.bk-slot-time { font-size: 0.78rem; font-weight: 700; color: var(--accent-deep); }
+.bk-slot-sub {
+  font-size: 0.6rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; color: #1f8a4c;
+}
+.bk-slot.is-sel { background: var(--accent); border-color: var(--accent); }
+.bk-slot.is-sel .bk-slot-time, .bk-slot.is-sel .bk-slot-sub { color: #fff; }
+.bk-slot.is-booked {
+  background: var(--bg-soft); border-color: transparent;
+  box-shadow: inset 0 1px 3px rgba(59, 28, 143, 0.08);
+  cursor: not-allowed;
+}
+.bk-slot.is-booked .bk-slot-time { color: #b6aed0; text-decoration: line-through; }
+.bk-slot.is-booked .bk-slot-sub { color: #b6aed0; }
+
+/* hosted-link waiting state */
+.pay-wait {
+  margin-top: 16px; padding: 16px;
+  border: 1px dashed var(--accent); border-radius: 14px; background: var(--bg-soft);
+}
+.pay-wait p { margin: 0 0 12px; font-size: 0.9rem; color: var(--accent-deep); line-height: 1.5; }
+.pay-wait-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.pay-wait-actions .cta { flex: 1; min-width: 150px; text-align: center; text-decoration: none; margin-top: 0; }
+.cta-ghost { background: #fff; color: var(--accent); border: 2px solid var(--accent); }
 .hold-note { text-align: center; color: var(--accent-deep); font-weight: 600; }
 .modal .cta { margin-top: 18px; }
 
@@ -643,3 +716,6 @@ p:last-child { margin-bottom: 0; }
   font-size: 1.8rem;
   display: flex; align-items: center; justify-content: center;
 }
+.booking-cross { background: #dc2626; }
+.booking-failed h3 { color: #b91c1c; }
+.booking-failed .pay-wait-actions { margin-top: 18px; }
