@@ -8,6 +8,7 @@ import {
   isMock,
   orderHasCapturedPayment,
   recentCapturedPaymentForPhone,
+  capturePayment,
 } from '../lib/razorpay.js'
 import { applySlotDrip } from '../lib/drip.js'
 import { syncLeadsToSheetSafe } from '../lib/google-sheets.js'
@@ -176,6 +177,18 @@ async function handlePaymentCaptured(payment, event) {
   console.log(`[webhook] captured ${payment?.id} → ${phone} (${matchedBy})${r ? '' : ' [no seat to claim]'}`)
 }
 
+// The account is on MANUAL capture, so Razorpay sends payment.authorized
+// (money held, not charged) and never payment.captured. Capture it ourselves,
+// then confirm the booking. (Idempotent: the later payment.captured event —
+// same payment id — is deduped by webhook_events.)
+async function handlePaymentAuthorized(payment, event) {
+  if (!payment?.id) return
+  const ok = await capturePayment(payment.id, payment.amount, payment.currency || 'INR')
+  // eslint-disable-next-line no-console
+  console.log(`[webhook] authorized ${payment.id} → capture ${ok ? 'ok' : 'FAILED'}`)
+  if (ok) await handlePaymentCaptured({ ...payment, status: 'captured' }, event)
+}
+
 async function handlePaymentFailed(payment) {
   const notePhone = String(payment?.notes?.phone || '').replace(/\D/g, '')
   const contact10 = String(payment?.contact || '').replace(/\D/g, '').slice(-10)
@@ -269,6 +282,8 @@ export async function razorpayWebhook(req, res) {
   try {
     if (type === 'payment.captured' || type === 'order.paid') {
       await handlePaymentCaptured(payment, event)
+    } else if (type === 'payment.authorized') {
+      await handlePaymentAuthorized(payment, event)
     } else if (type === 'payment.failed') {
       await handlePaymentFailed(payment)
     } else if (type === 'refund.processed' || type === 'refund.created') {

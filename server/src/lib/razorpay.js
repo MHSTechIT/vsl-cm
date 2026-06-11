@@ -46,6 +46,25 @@ export async function createOrder(phone) {
   }
 }
 
+// Capture an authorized payment (account is on manual capture). Returns true
+// if it's captured (or already was). Live keys only.
+export async function capturePayment(paymentId, amountPaise, currency = 'INR') {
+  if (isMock() || !paymentId) return false
+  const auth = Buffer.from(`${keyId}:${keySecret}`).toString('base64')
+  const res = await fetch(`https://api.razorpay.com/v1/payments/${paymentId}/capture`, {
+    method: 'POST',
+    headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ amount: amountPaise, currency }),
+  })
+  if (res.ok) return true
+  // already-captured payments return a specific error — treat as success
+  const t = await res.text().catch(() => '')
+  if (/already been captured/i.test(t)) return true
+  // eslint-disable-next-line no-console
+  console.error(`[payment] capture failed for ${paymentId} (${res.status}): ${t.slice(0, 120)}`)
+  return false
+}
+
 // Server-side source of truth: ask Razorpay whether an order has a captured
 // payment. Heals payments whose browser callback / webhook never arrived
 // (e.g. UPI QR scanned on a phone while the page was closed).
