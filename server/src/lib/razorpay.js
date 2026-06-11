@@ -46,6 +46,20 @@ export async function createOrder(phone) {
   }
 }
 
+// Server-side source of truth: ask Razorpay whether an order has a captured
+// payment. Heals payments whose browser callback / webhook never arrived
+// (e.g. UPI QR scanned on a phone while the page was closed).
+export async function orderHasCapturedPayment(orderId) {
+  if (isMock() || !orderId || String(orderId).startsWith('mock_')) return false
+  const auth = Buffer.from(`${keyId}:${keySecret}`).toString('base64')
+  const res = await fetch(`https://api.razorpay.com/v1/orders/${orderId}/payments`, {
+    headers: { Authorization: `Basic ${auth}` },
+  })
+  if (!res.ok) return false
+  const j = await res.json()
+  return (j.items || []).some((p) => p.status === 'captured')
+}
+
 // Verify the payment signature from Razorpay checkout. Mock mode always passes.
 export function verifyPayment({ orderId, paymentId, signature }) {
   if (mode === 'mock' || !keySecret) return true

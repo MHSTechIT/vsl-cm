@@ -6,11 +6,12 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: true, // expose on LAN so you can test on a real phone
-    port: 5173,
+    port: 6066,
     proxy: {
-      // forward API + uploaded files to the Phase 2 backend in dev
+      // forward API + media (DB-stored files) to the Phase 2 backend in dev
       '/api': 'http://localhost:8787',
       '/uploads': 'http://localhost:8787',
+      '/media': 'http://localhost:8787',
     },
   },
 })

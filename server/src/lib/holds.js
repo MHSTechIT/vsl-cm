@@ -5,11 +5,18 @@ import { sendWhatsApp, rescueMessage } from './whapi.js'
 // The lead who abandoned gets flagged/sent a WhatsApp rescue.
 // Called on a timer AND lazily before reads, so scarcity stays honest.
 export async function releaseExpiredHolds() {
+  // RETURNING gives post-update values, so the phone must be captured in a
+  // CTE BEFORE the update nulls it out (else the rescue flow never fires).
   const { rows } = await query(
-    `UPDATE slots
+    `WITH expired AS (
+       SELECT id, held_by_phone FROM slots
+        WHERE status = 'pending' AND hold_expires_at < now()
+     )
+     UPDATE slots s
         SET status = 'available', held_by_phone = NULL, hold_expires_at = NULL
-      WHERE status = 'pending' AND hold_expires_at < now()
-      RETURNING held_by_phone`,
+       FROM expired e
+      WHERE s.id = e.id
+      RETURNING e.held_by_phone`,
   )
 
   for (const row of rows) {

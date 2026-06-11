@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS leads (
   -- payment
   paid             BOOLEAN NOT NULL DEFAULT false,
   paid_at          TIMESTAMPTZ,
+  rzp_order_id     TEXT,                      -- last Razorpay order, for server-side reconciliation
 
   -- WhatsApp automation queue (used when Whapi token is absent / for review)
   needs_wa         TEXT,                      -- 'rescue' | 'confirmation' | null
@@ -75,6 +76,7 @@ CREATE TABLE IF NOT EXISTS testimonials (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS image_id INTEGER;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS rzp_order_id TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_slots_date ON slots (slot_date);
 CREATE INDEX IF NOT EXISTS idx_slots_status ON slots (status);

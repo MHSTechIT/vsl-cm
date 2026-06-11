@@ -50,6 +50,16 @@ function RegistrationGate({ onSubmit }) {
   )
 }
 
+// True watch percent: sum of the ranges the viewer actually played, relative
+// to the video's real duration — works the same for a 2-min or 15-min video
+// and isn't inflated by dragging the scrubber forward.
+function playedPercent(v) {
+  if (!v.duration) return 0
+  let secs = 0
+  for (let i = 0; i < v.played.length; i++) secs += v.played.end(i) - v.played.start(i)
+  return Math.min(100, (secs / v.duration) * 100)
+}
+
 // ---- Player + gate + watch-time tracking ----
 export default function VslVideo() {
   const [registered, setRegistered] = useState(Boolean(getLead()?.phone))
@@ -58,6 +68,7 @@ export default function VslVideo() {
   const videoRef = useRef(null)
   const fired = useRef({})
   const lastPercentSent = useRef(0)
+  const latestPercent = useRef(0)
   const unlocked = useRef(false)
 
   useEffect(() => {
@@ -80,6 +91,28 @@ export default function VslVideo() {
     api.progress(phone, checkpoint, Math.round(percent)).catch(() => {})
   }
 
+  // Push the exact current percent (used on pause / tab close so the admin
+  // panel shows the precise watch time, not the last 5% step).
+  function flushProgress(keepalive = false) {
+    const phone = getLead()?.phone
+    const pct = latestPercent.current
+    if (!phone || pct - lastPercentSent.current < 0.5) return
+    lastPercentSent.current = pct
+    api.progress(phone, '', Math.round(pct), keepalive).catch(() => {})
+  }
+
+  useEffect(() => {
+    const onHide = () => flushProgress(true)
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flushProgress(true) }
+    window.addEventListener('pagehide', onHide)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('pagehide', onHide)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const revealSeconds = cfg?.revealSeconds ?? 900
   const src = abs(cfg?.videoUrl) || ENV_SRC
   const poster = abs(cfg?.thumbUrl) || undefined
@@ -87,11 +120,13 @@ export default function VslVideo() {
   function onTimeUpdate(e) {
     const v = e.currentTarget
     if (v.duration) {
-      const pct = (v.currentTime / v.duration) * 100
+      const pct = playedPercent(v)
+      latestPercent.current = Math.max(latestPercent.current, pct)
+      // Milestones are relative to the video's length (work for any duration).
       if (pct >= 25) fire('25', pct)
-      if (v.currentTime >= 480) fire('8min', pct)
-      if (v.currentTime >= 900) fire('15min', pct)
-      if (pct - lastPercentSent.current >= 10) { lastPercentSent.current = pct; fire('', pct) }
+      if (pct >= 50) fire('50', pct)
+      if (pct >= 75) fire('75', pct)
+      if (pct - lastPercentSent.current >= 5) { lastPercentSent.current = pct; fire('', pct) }
     }
     if (v.currentTime >= revealSeconds) unlockBooking(unlocked)
   }
@@ -117,7 +152,8 @@ export default function VslVideo() {
           playsInline
           preload="metadata"
           onTimeUpdate={onTimeUpdate}
-          onEnded={() => { fire('finished', 100); unlockBooking(unlocked) }}
+          onPause={() => flushProgress()}
+          onEnded={() => { latestPercent.current = 100; fire('finished', 100); unlockBooking(unlocked) }}
         />
       ) : (
         <div
@@ -133,8 +169,8 @@ export default function VslVideo() {
                   <span className="vsl-sim-label">dev: simulate watch-time</span>
                   <div className="vsl-sim-btns">
                     <button type="button" onClick={() => fire('25', 25)}>25%</button>
-                    <button type="button" onClick={() => fire('8min', 55)}>8 min</button>
-                    <button type="button" onClick={() => { fire('15min', 80); unlockBooking(unlocked) }}>15 min</button>
+                    <button type="button" onClick={() => fire('50', 50)}>50%</button>
+                    <button type="button" onClick={() => { fire('75', 75); unlockBooking(unlocked) }}>75%</button>
                     <button type="button" onClick={() => { fire('finished', 100); unlockBooking(unlocked) }}>finish</button>
                   </div>
                 </div>

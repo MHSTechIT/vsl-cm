@@ -5,7 +5,14 @@
       "name": "vsl-dev",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "port": 5173
+      "port": 6066
+    },
+    {
+      "name": "vsl-server",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "server",
+      "port": 8787
     }
   ]
 }

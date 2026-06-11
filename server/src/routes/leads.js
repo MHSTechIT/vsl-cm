@@ -22,7 +22,10 @@ leadsRouter.post(
   }),
 )
 
-// Watch-time checkpoint. Called by the player at 25% / 8min / 15min / finished.
+// Watch-time checkpoint. Called by the player at 25% / 50% / 75% / finished
+// (relative to the video's actual length, so any duration works).
+// hit_8min / hit_15min are the legacy column names — they now store the
+// 50% / 75% milestones. Old checkpoint keys are still accepted.
 leadsRouter.post(
   '/:phone/progress',
   ah(async (req, res) => {
@@ -30,7 +33,14 @@ leadsRouter.post(
     const percent = clampPercent(req.body?.percent)
     const checkpoint = String(req.body?.checkpoint || '')
 
-    const cols = { 25: 'hit_25', '8min': 'hit_8min', '15min': 'hit_15min', finished: 'finished' }
+    const cols = {
+      25: 'hit_25',
+      50: 'hit_8min',
+      75: 'hit_15min',
+      '8min': 'hit_8min',
+      '15min': 'hit_15min',
+      finished: 'finished',
+    }
     const flag = cols[checkpoint]
 
     await query(

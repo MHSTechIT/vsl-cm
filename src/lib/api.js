@@ -31,11 +31,12 @@ export const api = {
   register: (name, phone) =>
     req('/api/leads', { method: 'POST', body: JSON.stringify({ name, phone }) }),
 
-  // watch checkpoints
-  progress: (phone, checkpoint, percent) =>
+  // watch checkpoints. keepalive lets the final percent survive tab close.
+  progress: (phone, checkpoint, percent, keepalive = false) =>
     req(`/api/leads/${encodeURIComponent(phone)}/progress`, {
       method: 'POST',
       body: JSON.stringify({ checkpoint, percent }),
+      keepalive,
     }),
 
   // slots / Form 2
@@ -49,4 +50,8 @@ export const api = {
     req('/api/payment/order', { method: 'POST', body: JSON.stringify({ phone }) }),
   verifyPayment: (payload) =>
     req('/api/payment/verify', { method: 'POST', body: JSON.stringify(payload) }),
+  paymentStatus: (phone, orderId) =>
+    req(
+      `/api/payment/status/${encodeURIComponent(phone)}${orderId ? `?order=${encodeURIComponent(orderId)}` : ''}`,
+    ),
 }

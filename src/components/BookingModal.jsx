@@ -32,12 +32,36 @@ export default function BookingModal({ onClose }) {
   const [confirmed, setConfirmed] = useState(null) // {date,time}
   const [secsLeft, setSecsLeft] = useState(0)
   const holdTimer = useRef(null)
+  const pollTimer = useRef(null)
+  const rzpRef = useRef(null)
+  const doneRef = useRef(false)
 
   // load available dates on open
   useEffect(() => {
     api.slotDates().then(setDates).catch(() => setErr('Could not load dates.'))
-    return () => clearInterval(holdTimer.current)
+    return () => {
+      clearInterval(holdTimer.current)
+      clearInterval(pollTimer.current)
+    }
   }, [])
+
+  // Safety net for UPI QR payments: the Razorpay success callback doesn't
+  // always fire (QR scanned on a phone, tab in background…), so poll the
+  // backend — it checks with Razorpay directly and confirms the booking.
+  function startPaymentPoll(phone, orderId) {
+    clearInterval(pollTimer.current)
+    let ticks = 0
+    pollTimer.current = setInterval(async () => {
+      if (++ticks > 180) return clearInterval(pollTimer.current) // give up after ~15 min
+      try {
+        const s = await api.paymentStatus(phone, orderId)
+        if (s.paid) {
+          finish({ date: s.date, time: s.time })
+          try { rzpRef.current?.close?.() } catch { /* modal may already be gone */ }
+        }
+      } catch { /* transient network error — keep polling */ }
+    }, 5000)
+  }
 
   async function pickDate(d) {
     setDate(d)
@@ -114,9 +138,12 @@ export default function BookingModal({ onClose }) {
             setStatus('form')
           }
         },
-        modal: { ondismiss: () => setStatus('form') },
+        // keep polling after dismiss — a QR payment may still land
+        modal: { ondismiss: () => { if (!doneRef.current) setStatus('form') } },
       })
+      rzpRef.current = rzp
       rzp.open()
+      startPaymentPoll(saved, order.orderId)
     } catch (e) {
       setErr(e.message || 'Booking failed. Please try again.')
       setStatus('form')
@@ -124,7 +151,10 @@ export default function BookingModal({ onClose }) {
   }
 
   function finish(r) {
+    if (doneRef.current) return // handler + poll can both land — first one wins
+    doneRef.current = true
     clearInterval(holdTimer.current)
+    clearInterval(pollTimer.current)
     setConfirmed({ date: r.date, time: r.time })
     setStatus('done')
   }

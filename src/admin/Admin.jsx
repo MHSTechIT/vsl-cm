@@ -195,7 +195,7 @@ function Dashboard() {
         <>
           <div className="adm-cards">
             <Stat variant="purple" value={s.registered} label="Registered to watch" tag="ALL" />
-            <Stat variant="amber" value={s.watch.m15} label="Watched 15 min" />
+            <Stat variant="amber" value={s.watch.m15} label="Watched 75%+" />
             <Stat variant="blue" value={s.form2} label="Form 2 filled" />
             <Stat variant="green" value={s.paid} label="Paid ₹99" />
           </div>
@@ -204,7 +204,7 @@ function Dashboard() {
             <h2 className="adm-h2">Drop-off funnel</h2>
             {[
               { label: 'Registered', n: s.registered, of: s.registered },
-              { label: 'Watched 15 min', n: s.watch.m15, of: s.registered },
+              { label: 'Watched 75%+', n: s.watch.m15, of: s.registered },
               { label: 'Form 2 filled', n: s.form2, of: s.watch.m15 },
               { label: 'Paid ₹99', n: s.paid, of: s.form2 },
             ].map((f, i) => (
@@ -222,8 +222,8 @@ function Dashboard() {
             <h2 className="adm-h2">Watch-time breakdown</h2>
             <div className="adm-watch">
               <span>25% <b>{s.watch.p25}</b></span>
-              <span>8-min <b>{s.watch.m8}</b></span>
-              <span>15-min <b>{s.watch.m15}</b></span>
+              <span>50% <b>{s.watch.m8}</b></span>
+              <span>75% <b>{s.watch.m15}</b></span>
               <span>finished <b>{s.watch.finished}</b></span>
             </div>
           </div>
