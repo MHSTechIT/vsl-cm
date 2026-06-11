@@ -9,7 +9,11 @@ const abs = (path) => (path ? `${API_BASE}${path}` : '')
 
 // Permanent VSL video (hosted on Vimeo). Always used unless an admin Vimeo
 // link explicitly overrides it — so the page never streams video from the DB.
-const DEFAULT_VIMEO_ID = '1200407732'
+const DEFAULT_VIMEO_ID = '1200466757'
+
+// Permanent video poster/thumbnail. Served as a static asset from /public, so
+// it is fixed in code and the admin panel / DB can never change it.
+const PERMANENT_POSTER = '/thumbnail.jpeg'
 
 function unlockBooking(ref) {
   if (ref.current) return
@@ -39,13 +43,23 @@ function RegistrationGate({ onSubmit }) {
   async function submit(e) {
     e.preventDefault()
     setErr('')
-    if (!name.trim() || phone.replace(/\D/g, '').length < 8) {
-      setErr('Please enter your name and a valid WhatsApp number.')
+    if (!name.trim()) {
+      setErr('Please enter your name.')
+      return
+    }
+    // Indian mobile: strip a leading 0/91, then require 10 digits starting 6–9.
+    const local = phone.replace(/\D/g, '').replace(/^(0+|91)/, '')
+    if (!/^[6-9]\d{9}$/.test(local)) {
+      setErr('Enter a valid 10-digit mobile number.')
+      return
+    }
+    if (/^(\d)\1{9}$/.test(local)) {
+      setErr('Please enter your real WhatsApp number.')
       return
     }
     setBusy(true)
     try {
-      await onSubmit(name.trim(), phone)
+      await onSubmit(name.trim(), local)
     } catch (e2) {
       setErr(e2.message || 'Something went wrong. Please try again.')
       setBusy(false)
@@ -54,14 +68,15 @@ function RegistrationGate({ onSubmit }) {
 
   return (
     <form className="reg-gate" onSubmit={submit}>
-      <p className="reg-gate-title">Enter your details to start the video</p>
+      <p className="reg-gate-title">Login To Watch The Training Video</p>
       <input className="reg-input" type="text" placeholder="Your name" value={name}
         onChange={(e) => setName(e.target.value)} autoComplete="name" autoFocus />
       <input className="reg-input" type="tel" inputMode="numeric" placeholder="WhatsApp number" value={phone}
-        onChange={(e) => setPhone(e.target.value)} autoComplete="tel" />
+        onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+        maxLength={10} autoComplete="tel" />
       {err && <p className="reg-error">{err}</p>}
       <button type="submit" className="cta reg-submit" disabled={busy}>
-        {busy ? 'Please wait…' : 'Submit & watch'}
+        {busy ? 'Please wait…' : 'Watch Now'}
       </button>
     </form>
   )
@@ -84,6 +99,7 @@ export default function VslVideo() {
   const [cfg, setCfg] = useState(null)
   const [vPlaying, setVPlaying] = useState(false)
   const [vMuted, setVMuted] = useState(false)
+  const [started, setStarted] = useState(false) // first play happened → hide poster
   const [bookReady, setBookReady] = useState(false) // booking unlocked
   const [isFs, setIsFs] = useState(false)           // player in fullscreen
   const videoRef = useRef(null)
@@ -171,7 +187,7 @@ export default function VslVideo() {
 
   const revealSeconds = cfg?.revealSeconds ?? 900
   const src = abs(cfg?.videoUrl) || ENV_SRC
-  const poster = abs(cfg?.thumbUrl) || undefined
+  const poster = PERMANENT_POSTER // fixed in code — admin/DB cannot override it
   // admin link overrides, else the permanent default (wait for cfg to load
   // so revealSeconds is settled and the player builds only once)
   const vimeoId = cfg ? (cfg.vimeoId || DEFAULT_VIMEO_ID) : null
@@ -198,7 +214,7 @@ export default function VslVideo() {
       player = new Vimeo.Player(iframe)
       vimeoPlayerRef.current = player
       player.getMuted().then((m) => alive && setVMuted(m)).catch(() => {})
-      player.on('play', () => setVPlaying(true))
+      player.on('play', () => { setVPlaying(true); setStarted(true) })
       player.on('pause', () => { setVPlaying(false); flushProgress() })
       player.on('timeupdate', ({ seconds, percent }) => {
         const pct = Math.min(100, (percent || 0) * 100)
@@ -270,6 +286,15 @@ export default function VslVideo() {
       {vimeoId ? (
         <div className="vsl-vimeo-wrap" ref={vimeoWrapRef}>
           <div id="vsl-video" className="vsl-player vsl-vimeo" ref={vimeoElRef} />
+          {!started && (
+            <div className="vsl-vimeo-poster" style={{ backgroundImage: `url(${poster})` }} aria-hidden="true" />
+          )}
+          {registered && !started && (
+            <button type="button" className="vfx-play-center" aria-label="Play video"
+              onClick={() => vimeoPlayerRef.current?.play?.().catch(() => {})}>
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg>
+            </button>
+          )}
           {bookReady && isFs && (
             <button type="button" className="vfx-book" onClick={bookFromPlayer}>
               Book my slot — ₹50 →
@@ -277,20 +302,6 @@ export default function VslVideo() {
           )}
           {registered && (
             <div className="vfx-bar">
-              <button type="button" className="vfx-btn" onClick={vTogglePlay} aria-label={vPlaying ? 'Pause' : 'Play'}>
-                {vPlaying ? (
-                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z" /></svg>
-                ) : (
-                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-                )}
-              </button>
-              <button type="button" className="vfx-btn" onClick={vToggleMute} aria-label={vMuted ? 'Unmute' : 'Mute'}>
-                {vMuted ? (
-                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 9v6h4l5 5V4L8 9H4zm12.5 3L19 9.5 17.5 8 15 10.5 12.5 8 11 9.5 13.5 12 11 14.5 12.5 16 15 13.5 17.5 16 19 14.5z" /></svg>
-                ) : (
-                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 9v6h4l5 5V4L8 9H4zm11 .5a4 4 0 0 1 0 5v-5zm0-4.3v2.1a6 6 0 0 1 0 9.4v2.1a8 8 0 0 0 0-13.6z" /></svg>
-                )}
-              </button>
               <span className="vfx-spacer" />
               <button type="button" className="vfx-btn" onClick={vFullscreen} aria-label="Fullscreen">
                 <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" /></svg>

@@ -300,6 +300,7 @@ adminRouter.get(
              COUNT(*) FILTER (WHERE status='pending')   AS pending,
              COUNT(*) FILTER (WHERE status='confirmed') AS confirmed,
              COUNT(*) FILTER (WHERE status='blocked')   AS blocked,
+             COUNT(*) FILTER (WHERE status='permanent') AS permanent,
              COUNT(*) FILTER (WHERE status='blocked' AND COALESCE(release_wave, 1) = 1) AS wave1,
              COUNT(*) FILTER (WHERE status='blocked' AND release_wave = 2)              AS wave2
         FROM slots
@@ -317,6 +318,7 @@ adminRouter.get(
         pending: Number(r.pending),
         confirmed: Number(r.confirmed),
         blocked: Number(r.blocked),
+        permanent: Number(r.permanent),
         wave1: Number(r.wave1),
         wave2: Number(r.wave2),
       })
@@ -332,8 +334,26 @@ adminRouter.post(
   ah(async (req, res) => {
     const date = String(req.body?.date || '')
     const time = String(req.body?.time || '')
-    const seats = Math.max(1, Math.min(50, Math.round(Number(req.body?.seats) || 0)))
+    const seats = Math.max(0, Math.min(50, Math.round(Number(req.body?.seats) || 0)))
     if (!date || !time) return res.status(400).json({ error: 'date and time required' })
+
+    // 0 = permanently booked: every open/blocked seat becomes 'permanent'
+    // (shown booked forever, never released by the payment drip).
+    if (seats === 0) {
+      await query(
+        `UPDATE slots SET status = 'permanent', release_wave = NULL
+          WHERE slot_date = $1 AND slot_time = $2 AND status IN ('available', 'blocked')`,
+        [date, time],
+      )
+      return res.json({ ok: true, seats: 0, permanent: true })
+    }
+
+    // any positive number first releases permanent seats back to available
+    await query(
+      `UPDATE slots SET status = 'available'
+        WHERE slot_date = $1 AND slot_time = $2 AND status = 'permanent'`,
+      [date, time],
+    )
 
     const { rows } = await query(
       `SELECT

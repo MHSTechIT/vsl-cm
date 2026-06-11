@@ -57,9 +57,17 @@ leadsRouter.post(
   }),
 )
 
+// Canonicalise to a 10-digit Indian mobile. Strips a leading 0 or 91 country
+// code, then requires a real mobile: exactly 10 digits starting with 6–9.
+// Returns '' for anything invalid (5-digit junk, 9999999999, etc.) so the
+// caller rejects it. Storing the bare 10 digits keeps WATI's toWati() (which
+// prefixes 91) and payment phone-matching consistent.
 function normalizePhone(raw) {
   const digits = String(raw || '').replace(/\D/g, '')
-  return digits.length >= 8 ? digits : ''
+  const local = digits.replace(/^(0+|91)/, '')
+  if (!/^[6-9]\d{9}$/.test(local)) return '' // wrong length or bad start digit
+  if (/^(\d)\1{9}$/.test(local)) return ''    // all-same-digit (9999999999)
+  return local
 }
 function clampPercent(p) {
   const n = Number(p)

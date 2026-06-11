@@ -733,7 +733,7 @@ function Slots() {
   }
   async function saveSeats() {
     const seats = Math.round(Number(seatVal))
-    if (Number.isFinite(seats) && seats >= 1) {
+    if (Number.isFinite(seats) && seats >= 0) {   // 0 = permanently booked
       await adminApi.setSeats(seatEdit.date, seatEdit.time, seats)
       load()
     }
@@ -748,7 +748,9 @@ function Slots() {
     await adminApi.closeDate(d); load()
   }
   const chipClass = (s) =>
-    s.available > 0 ? 'available' : s.confirmed >= s.capacity ? 'confirmed' : 'pending'
+    s.available > 0 ? 'available'
+      : s.permanent > 0 ? 'permanent'
+      : s.confirmed >= s.capacity ? 'confirmed' : 'pending'
 
   async function moveWave(d, time, wave) { await adminApi.setWave(d, time, wave); load() }
   async function unblock(d, time) { await adminApi.unblockSlot(d, time); load() }
@@ -790,6 +792,7 @@ function Slots() {
                 <span className="slot-seats">
                   {s.available}/{s.capacity} left
                   {s.blocked > 0 && <em className="slot-blocked"> · {s.blocked} shown booked</em>}
+                  {s.permanent > 0 && <em className="slot-permanent"> · permanently booked</em>}
                 </span>
                 <span
                   className="slot-x"
@@ -830,10 +833,10 @@ function Slots() {
         <div className="adm-overlay" onClick={() => setSeatEdit(null)}>
           <div className="adm-dialog" onClick={(e) => e.stopPropagation()}>
             <h3>Total seats</h3>
-            <p className="adm-dialog-sub">{seatEdit.time}</p>
+            <p className="adm-dialog-sub">{seatEdit.time} — set <b>0</b> to mark it permanently booked</p>
             <input
               type="number"
-              min="1"
+              min="0"
               value={seatVal}
               autoFocus
               onChange={(e) => setSeatVal(e.target.value)}

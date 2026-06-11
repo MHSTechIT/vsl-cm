@@ -843,6 +843,8 @@
 @media (max-width: 460px) { .slot-releases { grid-template-columns: 1fr; } }
 .slot-chip--pending { background: rgba(245, 158, 11, 0.14); color: var(--crm-amber-deep); border-color: rgba(245, 158, 11, 0.25); }   /* held */
 .slot-chip--confirmed { background: rgba(5, 150, 105, 0.12); color: var(--crm-green-deep); border-color: rgba(5, 150, 105, 0.22); }  /* full */
+.slot-chip--permanent { background: rgba(91, 33, 182, 0.1); color: var(--crm-muted-strong); border-color: rgba(91, 33, 182, 0.2); }  /* permanently booked */
+.slot-permanent { font-style: normal; font-weight: 700; color: var(--crm-red-deep); }
 .slot-x {
   position: absolute; top: -7px; right: -7px;
   width: 18px; height: 18px; border-radius: 50%;

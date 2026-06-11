@@ -391,7 +391,7 @@ export default function BookingModal({ onClose }) {
                 onClick={confirmAndPay}
                 disabled={!time || status === 'paying'}
               >
-                {status === 'paying' ? 'Processing…' : 'Confirm my slot — pay ₹50'}
+                {status === 'paying' ? 'Processing…' : 'Book My Appointment'}
               </button>
             )}
           </>

@@ -16,7 +16,7 @@ export const hero = {
     'Watch the full video before you do anything else. What Doctor Farmer reveals here, most doctors will never tell you in a 7-minute consultation.',
 }
 
-export const ctaLabel = 'Book my health assessment — ₹50'
+export const ctaLabel = 'Book My Health Assessment — ₹50'
 
 export const primaryCta = {
   riskLine:
