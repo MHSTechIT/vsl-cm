@@ -10,7 +10,7 @@ export const config = {
   databaseUrl: process.env.DATABASE_URL || '',
   databaseSsl: process.env.DATABASE_SSL === 'true',
 
-  holdWindowMinutes: Number(process.env.HOLD_WINDOW_MINUTES) || 12,
+  holdWindowMinutes: Number(process.env.HOLD_WINDOW_MINUTES) || 15,
 
   razorpay: {
     mode: process.env.RAZORPAY_MODE || 'mock', // 'mock' | 'live'

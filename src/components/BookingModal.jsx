@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
 import { getLead, saveLead } from '../lib/session.js'
+import { trackAppointmentBooked, trackPurchase } from '../lib/tracking.js'
 
 function fmtDate(iso) {
   const d = new Date(iso + 'T00:00:00')
@@ -280,6 +281,8 @@ export default function BookingModal({ onClose }) {
     doneRef.current = true
     clearInterval(holdTimer.current)
     clearInterval(pollTimer.current)
+    trackAppointmentBooked() // payment confirmed → success card appears
+    trackPurchase(50, 'INR')
     setConfirmed({ date: r.date, time: r.time })
     setStatus('done')
   }

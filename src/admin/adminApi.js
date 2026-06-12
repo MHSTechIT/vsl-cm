@@ -78,6 +78,14 @@ export const adminApi = {
   closeDate: (date) => req('/slots/close', { method: 'POST', body: JSON.stringify({ date }) }),
   setSeats: (date, time, seats) =>
     req('/slots/seats', { method: 'POST', body: JSON.stringify({ date, time, seats }) }),
+  slotSeats: (date, time) =>
+    req(`/slots/seats?date=${encodeURIComponent(date)}&time=${encodeURIComponent(time)}`),
+  addSeat: (date, time) =>
+    req('/slots/seat/add', { method: 'POST', body: JSON.stringify({ date, time }) }),
+  assignSeat: (date, time, seatId, phone) =>
+    req('/slots/seat/assign', { method: 'POST', body: JSON.stringify({ date, time, seatId, phone }) }),
+  freeSeat: (date, time, seatId) =>
+    req('/slots/seat/free', { method: 'POST', body: JSON.stringify({ date, time, seatId }) }),
   setWave: (date, time, wave) =>
     req('/slots/wave', { method: 'POST', body: JSON.stringify({ date, time, wave }) }),
   blockSlot: (date, time, wave) =>

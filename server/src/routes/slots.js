@@ -7,32 +7,63 @@ import { ah } from '../lib/ah.js'
 
 export const slotsRouter = Router()
 
+// slot_time is a label like "3.30pm-4.00pm" / "11.00am-11.30am". Parse its START
+// time and combine with the date as IST (+05:30, no DST) → epoch ms. A slot is
+// "past" (auto-closed) once its start time has passed.
+export function slotStartEpoch(dateISO, label) {
+  const m = String(label).trim().match(/^(\d{1,2})\.(\d{2})\s*(am|pm)/i)
+  if (!m) return null
+  let h = parseInt(m[1], 10) % 12
+  if (/pm/i.test(m[3])) h += 12
+  const ms = Date.parse(`${dateISO}T${String(h).padStart(2, '0')}:${m[2]}:00+05:30`)
+  return Number.isNaN(ms) ? null : ms
+}
+export function isPastSlot(dateISO, label, nowMs = Date.now()) {
+  const start = slotStartEpoch(dateISO, label)
+  return start != null && start <= nowMs
+}
+
 // Dates that still have at least one available slot (for the calendar).
 slotsRouter.get(
   '/dates',
   ah(async (_req, res) => {
     await releaseExpiredHolds()
     await applyDripAll()
-    // 'pending' (a seat someone is mid-payment on) counts as still bookable —
-    // a slot only closes once payment is CONFIRMED. 'blocked'/'permanent' stay
-    // closed (scarcity / manually reserved).
+    // Only 'available' seats are bookable. A 'pending' seat is RESERVED for the
+    // payer during the 15-min hold window (it auto-frees on expiry, see
+    // releaseExpiredHolds). 'blocked'/'permanent' stay closed (scarcity /
+    // manually reserved).
+    // A slot is bookable only while its start time is still in the future (IST).
+    // Past time slots auto-close — they never show on the calendar/booking form.
     const { rows } = await query(
-      `SELECT slot_date,
-              COUNT(*) FILTER (WHERE status IN ('available','pending')) AS available
+      `SELECT slot_date, slot_time,
+              COUNT(*) FILTER (WHERE status = 'available') AS available
          FROM slots
         WHERE slot_date >= CURRENT_DATE
-        GROUP BY slot_date
-        HAVING COUNT(*) FILTER (WHERE status IN ('available','pending')) > 0
-        ORDER BY slot_date`,
+        GROUP BY slot_date, slot_time`,
     )
-    res.json(rows.map((r) => ({ date: isoDate(r.slot_date), available: Number(r.available) })))
+    const now = Date.now()
+    const byDate = new Map()
+    for (const r of rows) {
+      const avail = Number(r.available)
+      if (avail <= 0) continue
+      const d = isoDate(r.slot_date)
+      if (isPastSlot(d, r.slot_time, now)) continue // skip times already passed
+      byDate.set(d, (byDate.get(d) || 0) + avail)
+    }
+    res.json(
+      [...byDate.entries()]
+        .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+        .map(([date, available]) => ({ date, available })),
+    )
   }),
 )
 
-// Times for a date. A time only shows BOOKED once its seats are CONFIRMED
-// (paid) or held back by scarcity ('blocked'/'permanent'). A seat someone is
-// mid-payment on ('pending') still counts as bookable, so a slot never closes
-// until the payment actually completes.
+// Times for a date. Only 'available' seats are bookable (`left`). A seat someone
+// is mid-payment on ('pending') is RESERVED for them during the 15-min hold
+// window — it isn't bookable by others, and auto-frees on expiry. 'blocked'/
+// 'permanent' stay closed (scarcity / manually reserved). A seat is only
+// permanently 'confirmed' (booked) once payment actually completes.
 slotsRouter.get(
   '/',
   ah(async (req, res) => {
@@ -42,7 +73,7 @@ slotsRouter.get(
     await applySlotDrip(date)
     const { rows } = await query(
       `SELECT slot_time,
-              COUNT(*) FILTER (WHERE status IN ('available','pending')) AS left,
+              COUNT(*) FILTER (WHERE status = 'available') AS left,
               COUNT(*) AS total
          FROM slots
         WHERE slot_date = $1
@@ -50,7 +81,12 @@ slotsRouter.get(
         ORDER BY MIN(id)`,
       [date],
     )
-    res.json(rows.map((r) => ({ time: r.slot_time, left: Number(r.left), total: Number(r.total) })))
+    const now = Date.now()
+    res.json(
+      rows
+        .filter((r) => !isPastSlot(date, r.slot_time, now)) // hide past times
+        .map((r) => ({ time: r.slot_time, left: Number(r.left), total: Number(r.total) })),
+    )
   }),
 )
 
@@ -65,6 +101,9 @@ slotsRouter.post(
     const time = String(req.body?.time || '')
     if (!phone || !date || !time) {
       return res.status(400).json({ error: 'phone, date and time required' })
+    }
+    if (isPastSlot(date, time)) {
+      return res.status(409).json({ error: 'this time has already passed — please pick another' })
     }
 
     const mins = config.holdWindowMinutes

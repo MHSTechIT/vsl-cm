@@ -113,6 +113,7 @@ CREATE TABLE IF NOT EXISTS users (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE slots ADD COLUMN IF NOT EXISTS release_wave INTEGER;
+ALTER TABLE slots ADD COLUMN IF NOT EXISTS manual BOOLEAN NOT NULL DEFAULT false; -- admin-assigned seat (not a real Razorpay payment) — deletable, unlike paid bookings
 
 -- Idempotency log — Razorpay retries webhooks; the unique (source,event_id)
 -- gate stops the same event from being processed twice.

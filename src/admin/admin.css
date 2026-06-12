@@ -381,7 +381,20 @@
 }
 .adm-watch b { color: var(--crm-primary); font-size: 1rem; margin-left: 6px; font-family: ui-monospace, monospace; }
 
-/* ---------- filters ---------- */
+/* ---------- video retention chart ---------- */
+.adm-chart-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.adm-chart-head .adm-h2 { margin: 0; }
+.adm-chart-head .dd { min-width: 140px; }
+.adm-chart-sub { margin: 4px 0 14px; }
+.adm-chart-sub b { color: var(--crm-primary); font-family: ui-monospace, monospace; }
+.adm-retention { width: 100%; height: auto; display: block; border-radius: 14px; }
+.adm-retention .rc-bg { fill: #faf8ff; stroke: var(--crm-line); stroke-width: 1; }
+.adm-retention .rc-grid { stroke: var(--crm-line); stroke-width: 1; }
+.adm-retention .rc-ylab { fill: var(--crm-muted); font-size: 11px; font-family: ui-monospace, monospace; }
+.adm-retention .rc-xlab { fill: var(--crm-muted); font-size: 11px; font-family: ui-monospace, monospace; }
+.adm-retention .rc-line { fill: none; stroke: url(#rc-line); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.adm-retention .rc-dot { fill: var(--crm-primary); stroke: #fff; stroke-width: 2; }
+.adm-chart-axis { text-align: center; margin: 8px 0 0; font-size: 0.75rem; font-weight: 600; color: var(--crm-muted); }
 .adm-filterbar { display: flex; gap: 9px; margin-bottom: 14px; flex-wrap: wrap; }
 .adm-filterbar input, .adm-filterbar select, .adm-openslot input {
   font-family: inherit; font-size: 0.85rem; font-weight: 500;
@@ -497,6 +510,54 @@
 .adm-dialog-actions { display: flex; gap: 10px; }
 .adm-dialog-actions .adm-btn { flex: 1; }
 
+/* ---- per-seat editor ---- */
+.adm-seat-dialog { max-width: 460px; }
+.adm-seat-err { margin: 0 0 12px; }
+.seat-rows { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; max-height: 50vh; overflow-y: auto; }
+.seat-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--crm-surface); border: 1px solid var(--crm-line);
+  border-radius: 12px; padding: 12px 14px;
+}
+.seat-row-name { color: var(--crm-deep); font-size: 0.95rem; }
+.seat-row-name b { color: var(--crm-primary); margin-right: 6px; }
+.seat-lead { font-weight: 600; }
+.seat-paid { color: var(--crm-muted-strong); font-style: normal; font-size: 0.8rem; }
+.seat-empty { color: var(--crm-muted-strong); }
+.seat-row-actions { display: flex; align-items: center; gap: 8px; }
+.seat-manual, .seat-del {
+  border: none; border-radius: 50px; cursor: pointer;
+  font-weight: 700; font-size: 0.8rem; padding: 7px 16px; color: #fff;
+}
+.seat-manual { background: #16a34a; }
+.seat-manual:hover:not(:disabled) { background: #15803d; }
+.seat-del { background: #dc2626; }
+.seat-del:hover:not(:disabled) { background: #b91c1c; }
+.seat-manual:disabled, .seat-del:disabled { opacity: 0.5; cursor: not-allowed; }
+.seat-locked { font-size: 1rem; }
+.adm-btn-add { background: var(--crm-primary); color: #fff; }
+
+/* ---- lead picker ---- */
+.adm-overlay--nested { z-index: 9100; background: rgba(15, 0, 40, 0.4); }
+.adm-picker { max-width: 420px; }
+.seat-search {
+  width: 100%; font-size: 0.95rem; text-align: left !important;
+  padding: 11px 14px; border: 1px solid var(--crm-line); border-radius: 12px;
+  margin-bottom: 12px; background: var(--crm-surface); color: var(--crm-deep);
+}
+.picker-rows { display: flex; flex-direction: column; gap: 6px; max-height: 50vh; overflow-y: auto; margin-bottom: 14px; }
+.picker-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--crm-surface); border: 1px solid var(--crm-line);
+  border-radius: 10px; padding: 10px 14px; cursor: pointer; text-align: left;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.picker-row:hover:not(:disabled) { background: rgba(91, 33, 182, 0.07); border-color: var(--crm-primary); }
+.picker-row:disabled { opacity: 0.5; cursor: not-allowed; }
+.picker-name { color: var(--crm-deep); font-weight: 600; font-size: 0.92rem; }
+.picker-phone { color: var(--crm-muted-strong); font-family: ui-monospace, monospace; font-size: 0.82rem; }
+.picker-paid { color: #16a34a; font-style: normal; }
+
 /* health-check form modal */
 .adm-dialog--wide { max-width: 680px; text-align: left; }
 .hc-modal {
@@ -603,6 +664,24 @@
 .adm-mono { font-family: ui-monospace, monospace; }
 .adm-dash { color: rgba(91, 33, 182, 0.25); }
 .adm-empty { text-align: center; color: var(--crm-muted-strong); padding: 26px; font-weight: 500; }
+
+/* leads pagination */
+.adm-pager {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 12px; margin-top: 16px;
+}
+.adm-pager-info { font-size: 0.85rem; color: var(--crm-muted-strong); font-weight: 600; }
+.adm-pager-btns { display: flex; align-items: center; gap: 10px; }
+.adm-pager-page { font-size: 0.85rem; color: var(--crm-muted-strong); font-weight: 600; }
+.adm-pager-btn {
+  border: 1px solid rgba(91, 33, 182, 0.22);
+  background: #fff; color: var(--crm-accent, #5b21b6);
+  font-weight: 700; font-size: 0.85rem;
+  padding: 8px 16px; border-radius: 10px; cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.adm-pager-btn:hover:not(:disabled) { background: rgba(91, 33, 182, 0.07); }
+.adm-pager-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* pills — uppercase, leading status dot */
 .pill {
@@ -773,6 +852,8 @@
 .slot-time { font-size: 0.85rem; font-weight: 700; }
 .slot-seats { font-size: 0.68rem; font-weight: 600; opacity: 0.8; font-family: ui-monospace, monospace; }
 .slot-blocked { font-style: normal; color: var(--crm-primary); }
+/* unpaid 15-min hold — temporary, auto-frees; not a paid booking */
+.slot-holding { font-style: normal; font-weight: 700; color: #b8860b; }
 
 /* release-wave cards (which fake-booked slots open at 5 / 10 payments) */
 .slot-releases {
@@ -845,6 +926,10 @@
 .slot-chip--confirmed { background: rgba(5, 150, 105, 0.12); color: var(--crm-green-deep); border-color: rgba(5, 150, 105, 0.22); }  /* full */
 .slot-chip--permanent { background: rgba(91, 33, 182, 0.1); color: var(--crm-muted-strong); border-color: rgba(91, 33, 182, 0.2); }  /* permanently booked */
 .slot-permanent { font-style: normal; font-weight: 700; color: var(--crm-red-deep); }
+/* start time already passed → auto-closed, greyed out */
+.slot-chip--past { background: rgba(120, 113, 130, 0.1); color: var(--crm-muted); border-color: rgba(120, 113, 130, 0.18); opacity: 0.7; }
+.slot-chip--past .slot-time { text-decoration: line-through; }
+.slot-past { font-style: normal; font-weight: 700; color: var(--crm-muted-strong); }
 .slot-x {
   position: absolute; top: -7px; right: -7px;
   width: 18px; height: 18px; border-radius: 50%;
@@ -927,8 +1012,11 @@
     width: auto; flex: none; height: auto; position: static;
     margin: 12px; padding: 12px;
     flex-direction: row; align-items: center; gap: 10px; overflow-x: auto;
+    scrollbar-width: none; /* Firefox — hide the bottom scrollbar */
   }
+  .adm-side::-webkit-scrollbar { display: none; } /* Chrome/Safari */
   .adm-brand { flex: 0 0 auto; padding: 0; margin: 0; border-bottom: none; }
+  .adm-brand div { display: none; } /* mobile: show only the logo */
   .adm-nav { flex-direction: row; margin-top: 0; }
   .adm-nav button { white-space: nowrap; }
   .adm-nav button.is-active::before { display: none; }

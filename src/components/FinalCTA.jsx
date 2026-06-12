@@ -17,15 +17,11 @@ export default function FinalCTA() {
   return (
     <section className="wrap final-cta" id="final">
       <h2>{finalCta.heading}</h2>
-      {bookingOpen ? (
+      {bookingOpen && (
         <>
           <CTAButton id="cta-final" where="final" />
           <p className="caption risk-line">{finalCta.riskLine}</p>
         </>
-      ) : (
-        <p className="caption hero-locked-note">
-          Keep watching — your booking option opens during the video.
-        </p>
       )}
     </section>
   )

@@ -442,16 +442,17 @@ p:last-child { margin-bottom: 0; }
 }
 .faq summary::-webkit-details-marker { display: none; }
 .faq summary::after {
-  content: "+";
+  content: "\25BE"; /* ▾ down-arrow chevron */
   position: absolute;
   right: 20px;
-  top: 20px;
-  font-size: 1.4rem;
+  top: 22px;
+  font-size: 1.1rem;
   font-weight: 400;
   color: var(--accent);
   line-height: 1;
+  transition: transform 0.18s ease;
 }
-.faq details[open] summary::after { content: "\2212"; }
+.faq details[open] summary::after { transform: rotate(180deg); }
 .faq .answer {
   padding: 0 20px 22px;
   font-size: 0.98rem;
@@ -536,36 +537,48 @@ p:last-child { margin-bottom: 0; }
   backdrop-filter: blur(3px);
 }
 
-/* big centered play button */
+/* "Play Video" pill button, positioned at the lower-center of the poster */
 .gate-play {
-  width: 76px;
-  height: 76px;
-  border-radius: 50%;
-  border: none;
-  cursor: pointer;
-  background: #fff;
-  color: var(--accent);
-  display: flex;
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 7px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.18);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.2px;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
-  transition: transform 0.12s ease;
+  transition: transform 0.12s ease, background 0.12s ease;
 }
-.gate-play:hover { transform: scale(1.06); }
-.gate-play svg { width: 34px; height: 34px; margin-left: 4px; }
+.gate-play:hover { transform: translateX(-50%) scale(1.06); background: rgba(255, 255, 255, 0.28); }
+.gate-play svg { width: 16px; height: 16px; }
 
 /* center play button shown over the poster for a registered viewer (before
    the video first plays — e.g. after a page reload) */
 .vfx-play-center {
-  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-  z-index: 4; width: 76px; height: 76px; border-radius: 50%; border: none;
-  cursor: pointer; background: #fff; color: var(--accent);
-  display: flex; align-items: center; justify-content: center;
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+  z-index: 4;
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 16px; border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  cursor: pointer; background: rgba(255, 255, 255, 0.18); color: #fff;
+  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+  font-weight: 700; font-size: 0.85rem; letter-spacing: 0.2px;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
-  transition: transform 0.12s ease;
+  transition: transform 0.12s ease, background 0.12s ease;
 }
-.vfx-play-center:hover { transform: translate(-50%, -50%) scale(1.06); }
-.vfx-play-center svg { width: 34px; height: 34px; margin-left: 4px; }
+.vfx-play-center:hover { transform: translateX(-50%) scale(1.06); background: rgba(255, 255, 255, 0.28); }
+.vfx-play-center svg { width: 16px; height: 16px; }
 
 /* legacy alias (kept for safety) */
 .reg-overlay {
@@ -792,6 +805,7 @@ p:last-child { margin-bottom: 0; }
 .bk-slot.is-booked .bk-slot-sub { color: #b6aed0; }
 /* Mobile: pack three time slots per row */
 @media (max-width: 560px) {
+  .final-cta h2 { font-size: 1.05rem; line-height: 1.45; }
   .bk-slots { grid-template-columns: repeat(3, 1fr); gap: 6px; }
   .bk-slot { padding: 8px 2px; border-radius: 9px; }
   .bk-slot-time { font-size: 0.6rem; white-space: nowrap; }
@@ -822,3 +836,25 @@ p:last-child { margin-bottom: 0; }
 .booking-cross { background: #dc2626; }
 .booking-failed h3 { color: #b91c1c; }
 .booking-failed .pay-wait-actions { margin-top: 18px; }
+
+/* Razorpay redirect landing page (/payment-success) */
+.pay-success-page {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  padding: 24px; background: var(--bg, #ece9fb);
+}
+.pay-success-card {
+  width: 100%; max-width: 420px; text-align: center;
+  background: #fff; border-radius: var(--radius, 18px);
+  padding: 32px 26px; box-shadow: 0 18px 50px rgba(40, 28, 102, 0.16);
+}
+.pay-success-card h3 { margin: 6px 0 8px; color: var(--accent-deep); font-size: 1.25rem; }
+.pay-success-card p { margin: 0 0 10px; color: var(--body); line-height: 1.6; }
+.pay-success-card .cta { margin-top: 18px; text-decoration: none; display: inline-block; }
+.pay-clock { background: #f59e0b; }
+.pay-spinner {
+  width: 48px; height: 48px; margin: 4px auto 16px;
+  border: 4px solid rgba(91, 33, 182, 0.18);
+  border-top-color: var(--accent, #5b21b6);
+  border-radius: 50%; animation: paySpin 0.8s linear infinite;
+}
+@keyframes paySpin { to { transform: rotate(360deg); } }

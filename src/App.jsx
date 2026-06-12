@@ -1,7 +1,6 @@
 import Hero from './components/Hero.jsx'
 import BookingModalHost from './components/BookingModalHost.jsx'
 import ProofCards from './components/ProofCards.jsx'
-import Qualify from './components/Qualify.jsx'
 import AboutDoctor from './components/AboutDoctor.jsx'
 import FAQ from './components/FAQ.jsx'
 import FinalCTA from './components/FinalCTA.jsx'
@@ -24,8 +23,6 @@ export default function App() {
       <Hero />
       <Divider />
       <ProofCards />
-      <Divider />
-      <Qualify />
       <Divider />
       <AboutDoctor />
       <Divider />

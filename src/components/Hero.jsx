@@ -34,15 +34,11 @@ export default function Hero() {
 
         <p className="caption hero-video-caption">{hero.videoCaption}</p>
 
-        {bookingOpen ? (
+        {bookingOpen && (
           <>
             <CTAButton id="cta-primary" where="primary" />
             <p className="caption risk-line">{primaryCta.riskLine}</p>
           </>
-        ) : (
-          <p className="caption hero-locked-note">
-            Keep watching — your booking option opens during the video.
-          </p>
         )}
       </div>
     </section>

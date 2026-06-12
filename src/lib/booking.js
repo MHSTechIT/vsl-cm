@@ -5,9 +5,9 @@
 // and dispatches 'open-booking', which BookingModalHost listens for.
 // ============================================================
 
-import { trackBookingClick } from './tracking.js'
+import { trackAppointmentInterested } from './tracking.js'
 
 export function openBooking(where = 'unknown') {
-  trackBookingClick(where)
+  trackAppointmentInterested() // booking intent — fires on the click, before payment
   window.dispatchEvent(new CustomEvent('open-booking', { detail: { where } }))
 }

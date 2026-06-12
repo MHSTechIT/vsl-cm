@@ -64,7 +64,9 @@ leadsRouter.post(
 // prefixes 91) and payment phone-matching consistent.
 function normalizePhone(raw) {
   const digits = String(raw || '').replace(/\D/g, '')
-  const local = digits.replace(/^(0+|91)/, '')
+  // Strip a leading 0/91 country code ONLY when extra digits are present —
+  // never from a bare 10-digit number (e.g. 9176xxxxxx legitimately starts "91").
+  const local = digits.length > 10 ? digits.replace(/^(0+|91)/, '') : digits
   if (!/^[6-9]\d{9}$/.test(local)) return '' // wrong length or bad start digit
   if (/^(\d)\1{9}$/.test(local)) return ''    // all-same-digit (9999999999)
   return local

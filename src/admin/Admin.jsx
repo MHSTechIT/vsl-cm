@@ -5,6 +5,21 @@ import './admin.css'
 const API_BASE = import.meta.env.VITE_API_URL || ''
 const abs = (p) => (p ? `${API_BASE}${p}` : '')
 const pct = (n, d) => (d > 0 ? `${((n / d) * 100).toFixed(1)}%` : '—')
+// Permanent Vimeo id (matches the public site) — used to look up the video's
+// total length so a lead's watch% can be shown as an actual mm:ss watch time.
+const DEFAULT_VIMEO_ID = '1200466757'
+// Leads table — rows shown per page.
+const LEADS_PER_PAGE = 10
+// percent watched × total video length → "mm:ss" (or "h:mm:ss" for long videos)
+const fmtWatchTime = (percent, durationSec) => {
+  if (!durationSec || percent == null) return '—'
+  let secs = Math.round((Number(percent) / 100) * durationSec)
+  const h = Math.floor(secs / 3600); secs -= h * 3600
+  const m = Math.floor(secs / 60); const s = secs % 60
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${m}:${String(s).padStart(2, '0')}`
+}
 const fmtDate = (iso) =>
   iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'
 // full timestamp (payment time) → "10 Jun, 11:38 am" in IST
@@ -287,9 +302,164 @@ function Dashboard() {
               <span>finished <b>{s.watch.finished}</b></span>
             </div>
           </div>
+
+          <div className="adm-block">
+            <VideoRetention />
+          </div>
         </>
       )}
     </section>
+  )
+}
+
+// Catmull-Rom spline → a smooth cubic-bezier path through the given points.
+function smoothPath(pts) {
+  if (!pts.length) return ''
+  if (pts.length < 2) return `M ${pts[0].x} ${pts[0].y}`
+  let d = `M ${pts[0].x} ${pts[0].y}`
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i]
+    const p1 = pts[i]
+    const p2 = pts[i + 1]
+    const p3 = pts[i + 2] || p2
+    const cp1x = p1.x + (p2.x - p0.x) / 6
+    const cp1y = p1.y + (p2.y - p0.y) / 6
+    const cp2x = p2.x - (p3.x - p1.x) / 6
+    const cp2y = p2.y - (p3.y - p1.y) / 6
+    d += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`
+  }
+  return d
+}
+
+// Video retention — for each minute of the video, how many people watched at
+// least that far. Computed client-side from each lead's max watch_percent ×
+// the video's real length (Vimeo). Filterable by today / 7 days / 30 days.
+function VideoRetention() {
+  const [leads, setLeads] = useState([])
+  const [duration, setDuration] = useState(0) // seconds
+  const [range, setRange] = useState('today')
+
+  useEffect(() => { adminApi.leads().then(setLeads).catch(() => {}) }, [])
+  useEffect(() => {
+    let alive = true
+    adminApi.getConfig()
+      .then((c) => c?.vimeoId || DEFAULT_VIMEO_ID)
+      .catch(() => DEFAULT_VIMEO_ID)
+      .then((id) =>
+        fetch(`https://vimeo.com/api/oembed.json?url=https://vimeo.com/${id}`)
+          .then((r) => r.json())
+          .then((j) => { if (alive && j?.duration) setDuration(j.duration) })
+          .catch(() => {}),
+      )
+    return () => { alive = false }
+  }, [])
+
+  // range → "registered since" cutoff (today = local midnight)
+  const sinceMs = (() => {
+    const now = new Date()
+    if (range === 'today') { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.getTime() }
+    if (range === 'week') return now.getTime() - 7 * 86400000
+    return now.getTime() - 30 * 86400000
+  })()
+
+  const inRange = leads.filter((l) => l.registered_at && new Date(l.registered_at).getTime() >= sinceMs)
+  const durMin = duration / 60
+  const totalMin = durMin ? Math.max(1, Math.floor(durMin)) : 0
+
+  // retention[m] = people whose furthest watch reached at least minute m
+  const buckets = []
+  for (let m = 1; m <= totalMin; m++) {
+    const watchers = inRange.reduce((n, l) => {
+      const watchedMin = ((Number(l.watch_percent) || 0) / 100) * durMin
+      return watchedMin >= m ? n + 1 : n
+    }, 0)
+    buckets.push({ minute: m, count: watchers })
+  }
+  const maxCount = Math.max(1, ...buckets.map((b) => b.count))
+
+  // SVG geometry
+  const W = 720, H = 280, padL = 40, padR = 16, padT = 18, padB = 28
+  const plotW = W - padL - padR, plotH = H - padT - padB
+  const yTicks = [0, Math.round(maxCount / 2), maxCount].filter((v, i, a) => a.indexOf(v) === i)
+  const xLabelEvery = totalMin > 16 ? 3 : totalMin > 8 ? 2 : 1
+
+  // points along the curve (line spans the full plot width)
+  const px = (m) => padL + (totalMin > 1 ? ((m - 1) / (totalMin - 1)) * plotW : plotW / 2)
+  const py = (c) => padT + plotH - (c / maxCount) * plotH
+  const pts = buckets.map((b) => ({ x: px(b.minute), y: py(b.count) }))
+  // Catmull-Rom → cubic-bezier for a smooth single line through the points
+  const linePath = smoothPath(pts)
+  const areaPath = pts.length
+    ? `${linePath} L ${pts[pts.length - 1].x} ${padT + plotH} L ${pts[0].x} ${padT + plotH} Z`
+    : ''
+
+  return (
+    <>
+      <div className="adm-chart-head">
+        <h2 className="adm-h2">Video retention</h2>
+        <Dropdown
+          value={range}
+          onChange={setRange}
+          options={[
+            { value: 'today', label: 'Today' },
+            { value: 'week', label: 'Weekly' },
+            { value: 'month', label: 'Monthly' },
+          ]}
+        />
+      </div>
+      <p className="adm-sub adm-chart-sub">
+        People still watching at each minute · <b>{inRange.length}</b> {range === 'today' ? 'today' : range === 'week' ? 'in 7 days' : 'in 30 days'}
+      </p>
+
+      {!duration ? (
+        <p className="adm-empty">Loading video length…</p>
+      ) : inRange.length === 0 ? (
+        <p className="adm-empty">No registrations in this range.</p>
+      ) : (
+        <svg viewBox={`0 0 ${W} ${H}`} className="adm-retention" role="img" aria-label="Video retention by minute">
+          <defs>
+            <linearGradient id="rc-line" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#7c3aed" />
+              <stop offset="100%" stopColor="#a855f7" />
+            </linearGradient>
+            <linearGradient id="rc-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#7c3aed" stopOpacity="0.16" />
+              <stop offset="100%" stopColor="#7c3aed" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+
+          {/* light plot background to match the dashboard */}
+          <rect x="0" y="0" width={W} height={H} rx="14" className="rc-bg" />
+
+          {/* y gridlines + labels */}
+          {yTicks.map((v) => {
+            const y = padT + plotH - (v / maxCount) * plotH
+            return (
+              <g key={v}>
+                <line x1={padL} y1={y} x2={W - padR} y2={y} className="rc-grid" />
+                <text x={padL - 8} y={y} className="rc-ylab" textAnchor="end" dominantBaseline="central">{v}</text>
+              </g>
+            )
+          })}
+
+          {/* area fill + gradient line */}
+          {areaPath && <path d={areaPath} fill="url(#rc-fill)" stroke="none" />}
+          <path d={linePath} className="rc-line" />
+          {/* end-point dot */}
+          {pts.length > 0 && (
+            <circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r="4.5" className="rc-dot" />
+          )}
+
+          {/* x labels (minute numbers) */}
+          {buckets.filter((b) => b.minute % xLabelEvery === 0 || b.minute === 1).map((b) => (
+            <text key={b.minute} x={px(b.minute)} y={H - 8} className="rc-xlab" textAnchor="middle">{b.minute}</text>
+          ))}
+        </svg>
+      )}
+      {duration > 0 && inRange.length > 0 && (
+        <p className="adm-chart-axis">Minutes of video →</p>
+      )}
+    </>
   )
 }
 const Stat = ({ variant, value, label, tag }) => (
@@ -404,8 +574,26 @@ function Leads() {
   const [filter, setFilter] = useState('all')
   const [q, setQ] = useState('')
   const [hcEdit, setHcEdit] = useState(null) // the lead row being HC-edited
+  const [duration, setDuration] = useState(0) // total video length (seconds)
+  const [page, setPage] = useState(1) // current page (1-based)
   const load = useCallback(() => adminApi.leads().then(setRows).catch(() => {}), [])
   useEffect(() => { load() }, [load])
+
+  // Look up the video's total length once (admin Vimeo id, else the default)
+  // so each lead's watch% can be rendered as a real mm:ss watch time.
+  useEffect(() => {
+    let alive = true
+    adminApi.getConfig()
+      .then((c) => c?.vimeoId || DEFAULT_VIMEO_ID)
+      .catch(() => DEFAULT_VIMEO_ID)
+      .then((id) =>
+        fetch(`https://vimeo.com/api/oembed.json?url=https://vimeo.com/${id}`)
+          .then((r) => r.json())
+          .then((j) => { if (alive && j?.duration) setDuration(j.duration) })
+          .catch(() => {}),
+      )
+    return () => { alive = false }
+  }, [])
 
   const filtered = rows.filter((r) => {
     if (q && !`${r.name} ${r.phone}`.toLowerCase().includes(q.toLowerCase())) return false
@@ -416,11 +604,19 @@ function Leads() {
     return true
   })
 
+  // Paginate — 10 leads per page. Jump back to page 1 whenever the search or
+  // filter changes so we never land on a now-empty page.
+  useEffect(() => { setPage(1) }, [q, filter])
+  const pageCount = Math.max(1, Math.ceil(filtered.length / LEADS_PER_PAGE))
+  const safePage = Math.min(page, pageCount)
+  const pageRows = filtered.slice((safePage - 1) * LEADS_PER_PAGE, safePage * LEADS_PER_PAGE)
+
   function exportCsv() {
-    const head = ['Name', 'Phone', 'Pay phone', 'Watch%', 'Form2', 'Slot date & time',
+    const head = ['Name', 'Phone', 'Pay phone', 'Watch%', 'Watch time', 'Form2', 'Slot date & time',
       'WA payment', 'WA 1-hr', 'Registered at', 'Payment status', 'HC status']
     const lines = filtered.map((r) => [
       r.name, r.phone, r.payment_phone || '', r.watch_percent,
+      fmtWatchTime(r.watch_percent, duration),
       r.form2_submitted ? 'yes' : 'no',
       r.slot_date ? `${r.slot_date} ${r.slot_time}` : '',
       r.wa_payment || '',
@@ -470,13 +666,13 @@ function Leads() {
         <table className="adm-table">
           <thead>
             <tr>
-              <th>Name</th><th>Phone</th><th>Pay phone</th><th>Watch</th><th>Form 2</th>
+              <th>Name</th><th>Phone</th><th>Pay phone</th><th>Watch</th><th>Watch time</th><th>Form 2</th>
               <th>Slot date &amp; time</th><th>WA payment</th><th>WA 1-hr</th>
               <th>Registered at</th><th>Payment status</th><th>HC status</th><th>Edit</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((r) => {
+            {pageRows.map((r) => {
               const payStatus = r.payment_status || (r.paid ? 'success' : null)
               return (
               <tr key={r.phone}>
@@ -484,6 +680,7 @@ function Leads() {
                 <td className="adm-mono">{r.phone}</td>
                 <td className="adm-mono">{r.payment_phone || <span className="adm-dash">—</span>}</td>
                 <td className="adm-mono">{r.watch_percent}%</td>
+                <td className="adm-mono">{fmtWatchTime(r.watch_percent, duration)}</td>
                 <td>{r.form2_submitted ? <Pill c="blue">Yes</Pill> : <span className="adm-dash">—</span>}</td>
                 <td>{r.slot_date ? `${fmtDate(r.slot_date)} · ${r.slot_time}` : <span className="adm-dash">—</span>}</td>
                 <td>
@@ -510,10 +707,25 @@ function Leads() {
               </tr>
               )
             })}
-            {filtered.length === 0 && <tr><td colSpan="12" className="adm-empty">No leads yet.</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan="13" className="adm-empty">No leads yet.</td></tr>}
           </tbody>
         </table>
       </div>
+
+      {filtered.length > 0 && (
+        <div className="adm-pager">
+          <span className="adm-pager-info">
+            {(safePage - 1) * LEADS_PER_PAGE + 1}–{Math.min(safePage * LEADS_PER_PAGE, filtered.length)} of {filtered.length}
+          </span>
+          <div className="adm-pager-btns">
+            <button className="adm-pager-btn" disabled={safePage <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}>← Prev</button>
+            <span className="adm-pager-page">Page {safePage} / {pageCount}</span>
+            <button className="adm-pager-btn" disabled={safePage >= pageCount}
+              onClick={() => setPage((p) => Math.min(pageCount, p + 1))}>Next →</button>
+          </div>
+        </div>
+      )}
 
       {hcEdit && (
         <HcModal
@@ -707,9 +919,17 @@ function Slots() {
   const [date, setDate] = useState('')
   const [msg, setMsg] = useState('')
   const [seatEdit, setSeatEdit] = useState(null) // { date, time }
-  const [seatVal, setSeatVal] = useState('')
+  const [seatList, setSeatList] = useState([])   // per-seat rows for the open slot
+  const [seatBusy, setSeatBusy] = useState(false)
+  const [seatErr, setSeatErr] = useState('')
+  const [picker, setPicker] = useState(null)     // seat being manually assigned
   const load = useCallback(() => adminApi.slots().then(setGroups).catch(() => {}), [])
   useEffect(() => { load() }, [load])
+
+  const loadSeats = useCallback((d, t) => {
+    setSeatErr('')
+    return adminApi.slotSeats(d, t).then(setSeatList).catch(() => setSeatList([]))
+  }, [])
 
   async function openDate(e) {
     e.preventDefault()
@@ -729,15 +949,37 @@ function Slots() {
   }
   function openSeats(d, s) {
     setSeatEdit({ date: d, time: s.time })
-    setSeatVal(String(s.capacity))
+    setSeatList([])
+    loadSeats(d, s.time)
   }
-  async function saveSeats() {
-    const seats = Math.round(Number(seatVal))
-    if (Number.isFinite(seats) && seats >= 0) {   // 0 = permanently booked
-      await adminApi.setSeats(seatEdit.date, seatEdit.time, seats)
-      load()
-    }
+  function closeSeats() {
     setSeatEdit(null)
+    setPicker(null)
+    setSeatErr('')
+    load() // refresh the grid counts
+  }
+  async function addSeat() {
+    if (!seatEdit) return
+    setSeatBusy(true); setSeatErr('')
+    try { await adminApi.addSeat(seatEdit.date, seatEdit.time); await loadSeats(seatEdit.date, seatEdit.time) }
+    catch (e) { setSeatErr(e.message) }
+    finally { setSeatBusy(false) }
+  }
+  async function delSeat(seat) {
+    if (!seatEdit) return
+    setSeatBusy(true); setSeatErr('')
+    try { await adminApi.freeSeat(seatEdit.date, seatEdit.time, seat.id); await loadSeats(seatEdit.date, seatEdit.time) }
+    catch (e) { setSeatErr(e.message) }
+    finally { setSeatBusy(false) }
+  }
+  async function assignLead(seat, phone) {
+    setSeatBusy(true); setSeatErr('')
+    try {
+      await adminApi.assignSeat(seatEdit.date, seatEdit.time, seat.id, phone)
+      setPicker(null)
+      await loadSeats(seatEdit.date, seatEdit.time)
+    } catch (e) { setSeatErr(e.message) }
+    finally { setSeatBusy(false) }
   }
   async function removeTime(d, time) {
     if (!confirm(`Remove the ${time} slot?`)) return
@@ -748,7 +990,8 @@ function Slots() {
     await adminApi.closeDate(d); load()
   }
   const chipClass = (s) =>
-    s.available > 0 ? 'available'
+    s.past ? 'past'
+      : s.available > 0 ? 'available'
       : s.permanent > 0 ? 'permanent'
       : s.confirmed >= s.capacity ? 'confirmed' : 'pending'
 
@@ -790,9 +1033,16 @@ function Slots() {
               >
                 <span className="slot-time">{s.time}</span>
                 <span className="slot-seats">
-                  {s.available}/{s.capacity} left
-                  {s.blocked > 0 && <em className="slot-blocked"> · {s.blocked} shown booked</em>}
-                  {s.permanent > 0 && <em className="slot-permanent"> · permanently booked</em>}
+                  {s.past ? (
+                    <em className="slot-past">closed · time passed</em>
+                  ) : (
+                    <>
+                      {s.available}/{s.capacity} left
+                      {s.pending > 0 && <em className="slot-holding"> · {s.pending} holding (unpaid)</em>}
+                      {s.blocked > 0 && <em className="slot-blocked"> · {s.blocked} shown booked</em>}
+                      {s.permanent > 0 && <em className="slot-permanent"> · permanently booked</em>}
+                    </>
+                  )}
                 </span>
                 <span
                   className="slot-x"
@@ -830,26 +1080,87 @@ function Slots() {
       {groups.length === 0 && <p className="adm-empty">No dates open yet.</p>}
 
       {seatEdit && (
-        <div className="adm-overlay" onClick={() => setSeatEdit(null)}>
-          <div className="adm-dialog" onClick={(e) => e.stopPropagation()}>
+        <div className="adm-overlay" onClick={closeSeats}>
+          <div className="adm-dialog adm-seat-dialog" onClick={(e) => e.stopPropagation()}>
             <h3>Total seats</h3>
-            <p className="adm-dialog-sub">{seatEdit.time} — set <b>0</b> to mark it permanently booked</p>
-            <input
-              type="number"
-              min="0"
-              value={seatVal}
-              autoFocus
-              onChange={(e) => setSeatVal(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') saveSeats() }}
-            />
+            <p className="adm-dialog-sub">{seatEdit.time} — assign a lead, or <b>del</b> to remove a seat</p>
+            {seatErr && <p className="adm-msg adm-seat-err">{seatErr}</p>}
+
+            <div className="seat-rows">
+              {seatList.map((seat, i) => (
+                <div className="seat-row" key={seat.id}>
+                  <span className="seat-row-name">
+                    <b>{i + 1}</b>{' '}
+                    {seat.leadName
+                      ? <span className="seat-lead">{seat.leadName}{seat.locked && <em className="seat-paid"> · paid</em>}</span>
+                      : <span className="seat-empty">( {seat.status === 'available' ? 'empty' : seat.status} )</span>}
+                  </span>
+                  <span className="seat-row-actions">
+                    {!seat.locked && (
+                      <button className="seat-manual" disabled={seatBusy} onClick={() => setPicker(seat)}>manual</button>
+                    )}
+                    {seat.locked
+                      ? <span className="seat-locked" title="Real paid booking — protected">🔒</span>
+                      : <button className="seat-del" disabled={seatBusy} onClick={() => delSeat(seat)}>del</button>}
+                  </span>
+                </div>
+              ))}
+              {seatList.length === 0 && <p className="adm-empty">No seats — add one below.</p>}
+            </div>
+
             <div className="adm-dialog-actions">
-              <button className="adm-btn adm-btn-ghost" onClick={() => setSeatEdit(null)}>Cancel</button>
-              <button className="adm-btn adm-btn-primary" onClick={saveSeats}>Save</button>
+              <button className="adm-btn adm-btn-ghost" onClick={closeSeats}>Cancel</button>
+              <button className="adm-btn adm-btn-add" disabled={seatBusy} onClick={addSeat}>add</button>
+              <button className="adm-btn adm-btn-primary" onClick={closeSeats}>Save</button>
             </div>
           </div>
+
+          {picker && (
+            <LeadPicker
+              busy={seatBusy}
+              onPick={(phone) => assignLead(picker, phone)}
+              onClose={() => setPicker(null)}
+            />
+          )}
         </div>
       )}
     </section>
+  )
+}
+
+// ---------- Lead picker (search + select a lead to manually book a seat) ----------
+function LeadPicker({ onPick, onClose, busy }) {
+  const [rows, setRows] = useState([])
+  const [q, setQ] = useState('')
+  useEffect(() => { adminApi.leads().then(setRows).catch(() => setRows([])) }, [])
+  const filtered = rows.filter((r) =>
+    !q || `${r.name} ${r.phone}`.toLowerCase().includes(q.toLowerCase()),
+  )
+  return (
+    <div className="adm-overlay adm-overlay--nested" onClick={(e) => { e.stopPropagation(); onClose() }}>
+      <div className="adm-dialog adm-picker" onClick={(e) => e.stopPropagation()}>
+        <h3>Choose a lead</h3>
+        <input
+          className="seat-search"
+          placeholder="Search name or phone"
+          value={q}
+          autoFocus
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <div className="picker-rows">
+          {filtered.map((r) => (
+            <button key={r.phone} className="picker-row" disabled={busy} onClick={() => onPick(r.phone)}>
+              <span className="picker-name">{r.name}</span>
+              <span className="picker-phone">{r.phone}{r.paid && <em className="picker-paid"> · booked</em>}</span>
+            </button>
+          ))}
+          {filtered.length === 0 && <p className="adm-empty">No leads match.</p>}
+        </div>
+        <div className="adm-dialog-actions">
+          <button className="adm-btn adm-btn-ghost" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
   )
 }
 

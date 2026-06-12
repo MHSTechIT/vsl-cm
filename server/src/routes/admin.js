@@ -4,12 +4,13 @@ import multer from 'multer'
 import { query } from '../db.js'
 import { config } from '../config.js'
 import { releaseExpiredHolds } from '../lib/holds.js'
-import { applyDripAll, DAY_SEATS, DAY_OPEN } from '../lib/drip.js'
-import { isoDate } from './slots.js'
+import { applyDripAll, applySlotDrip, DAY_SEATS, DAY_OPEN } from '../lib/drip.js'
+import { isoDate, isPastSlot } from './slots.js'
 import { ah } from '../lib/ah.js'
 import { setSetting, getSettings } from '../lib/settings.js'
 import { syncLeadsToSheet, spreadsheetIdFromUrl, isConfigured as googleConfigured } from '../lib/google-sheets.js'
-import { sendSessionMessage, watiConfigured } from '../lib/wati.js'
+import { sendSessionMessage, watiConfigured, watiPaymentSuccess } from '../lib/wati.js'
+import { sendWhatsApp, confirmationMessage } from '../lib/whapi.js'
 import { paymentContact, orderPaymentContact } from '../lib/razorpay.js'
 
 export const adminRouter = Router()
@@ -307,6 +308,7 @@ adminRouter.get(
        GROUP BY slot_date, slot_time
        ORDER BY slot_date, MIN(id)
     `)
+    const nowMs = Date.now()
     const byDate = new Map()
     for (const r of rows) {
       const d = isoDate(r.slot_date)
@@ -321,6 +323,7 @@ adminRouter.get(
         permanent: Number(r.permanent),
         wave1: Number(r.wave1),
         wave2: Number(r.wave2),
+        past: isPastSlot(d, r.slot_time, nowMs), // start time passed (IST) → auto-closed
       })
     }
     res.json([...byDate.entries()].map(([date, slots]) => ({ date, slots })))
@@ -383,6 +386,144 @@ adminRouter.post(
       )
     }
     res.json({ ok: true, seats: target })
+  }),
+)
+
+// List every seat for a (date,time) with its occupant — powers the per-seat
+// editor. `locked` marks a real (Razorpay-paid) booking that must not be touched.
+adminRouter.get(
+  '/slots/seats',
+  ah(async (req, res) => {
+    const date = String(req.query?.date || '')
+    const time = String(req.query?.time || '')
+    if (!date || !time) return res.status(400).json({ error: 'date and time required' })
+    const { rows } = await query(
+      `SELECT s.id, s.status, s.lead_phone, s.manual, l.name AS lead_name
+         FROM slots s
+         LEFT JOIN leads l ON l.phone = s.lead_phone
+        WHERE s.slot_date = $1 AND s.slot_time = $2
+        ORDER BY s.id`,
+      [date, time],
+    )
+    res.json(
+      rows.map((r) => ({
+        id: r.id,
+        status: r.status,
+        leadPhone: r.lead_phone,
+        leadName: r.lead_name,
+        manual: r.manual,
+        locked: r.status === 'confirmed' && !r.manual, // real paid booking
+      })),
+    )
+  }),
+)
+
+// Add one empty seat to a (date,time).
+adminRouter.post(
+  '/slots/seat/add',
+  ah(async (req, res) => {
+    const date = String(req.body?.date || '')
+    const time = String(req.body?.time || '')
+    if (!date || !time) return res.status(400).json({ error: 'date and time required' })
+    const { rows } = await query(
+      `INSERT INTO slots (slot_date, slot_time) VALUES ($1, $2) RETURNING id`,
+      [date, time],
+    )
+    res.json({ ok: true, id: rows[0].id })
+  }),
+)
+
+// Manually assign a lead to a specific seat and mark it booked + paid (counts
+// as a ₹50 booking). Sends the same confirmation WhatsApp a real payment does.
+adminRouter.post(
+  '/slots/seat/assign',
+  ah(async (req, res) => {
+    const date = String(req.body?.date || '')
+    const time = String(req.body?.time || '')
+    const seatId = Number(req.body?.seatId)
+    const phone = String(req.body?.phone || '').replace(/\D/g, '')
+    if (!date || !time || !Number.isFinite(seatId) || !phone)
+      return res.status(400).json({ error: 'date, time, seatId, phone required' })
+
+    const seatRows = await query(
+      `SELECT id, status, manual FROM slots WHERE id = $1 AND slot_date = $2 AND slot_time = $3`,
+      [seatId, date, time],
+    )
+    if (!seatRows.rows.length) return res.status(404).json({ error: 'seat not found' })
+    if (seatRows.rows[0].status === 'confirmed' && !seatRows.rows[0].manual)
+      return res.status(409).json({ error: 'that seat is a real paid booking' })
+
+    const leadRows = await query(`SELECT phone, name FROM leads WHERE phone = $1`, [phone])
+    if (!leadRows.rows.length) return res.status(404).json({ error: 'lead not found' })
+
+    // Release any other manual seat this lead currently occupies (avoid dupes).
+    await query(
+      `UPDATE slots SET status = 'available', lead_phone = NULL, held_by_phone = NULL,
+              hold_expires_at = NULL, manual = false
+        WHERE lead_phone = $1 AND id <> $2 AND manual = true`,
+      [phone, seatId],
+    )
+    // Claim this seat for the lead (flagged manual).
+    await query(
+      `UPDATE slots SET status = 'confirmed', lead_phone = $2, held_by_phone = NULL,
+              hold_expires_at = NULL, manual = true
+        WHERE id = $1`,
+      [seatId, phone],
+    )
+    // Mark the lead booked + paid.
+    await query(
+      `UPDATE leads
+          SET slot_date = $2, slot_time = $3, slot_status = 'confirmed',
+              paid = true, paid_at = COALESCE(paid_at, now()),
+              payment_status = 'success', wa_payment = 'success', updated_at = now()
+        WHERE phone = $1`,
+      [phone, date, time],
+    )
+    // Booking-confirmation WhatsApp (same path as a real payment).
+    if (watiConfigured()) {
+      const dmy = date.split('-').reverse().join('/') // YYYY-MM-DD → DD/MM/YYYY
+      watiPaymentSuccess(phone, { date: dmy, time }).catch((e) =>
+        // eslint-disable-next-line no-console
+        console.error('[wati] manual booking confirm failed:', e.message),
+      )
+    } else {
+      sendWhatsApp(phone, confirmationMessage(date, time), 'confirmation').catch(() => {})
+    }
+    applySlotDrip(date).catch(() => {})
+    res.json({ ok: true, name: leadRows.rows[0].name })
+  }),
+)
+
+// Delete a seat (per-seat "del"). Empty/blocked/manual seats only — a real paid
+// booking is protected. A manual booking also clears the lead's booking.
+adminRouter.post(
+  '/slots/seat/free',
+  ah(async (req, res) => {
+    const date = String(req.body?.date || '')
+    const time = String(req.body?.time || '')
+    const seatId = Number(req.body?.seatId)
+    if (!date || !time || !Number.isFinite(seatId))
+      return res.status(400).json({ error: 'date, time, seatId required' })
+
+    const seatRows = await query(
+      `SELECT id, status, manual, lead_phone FROM slots WHERE id = $1 AND slot_date = $2 AND slot_time = $3`,
+      [seatId, date, time],
+    )
+    if (!seatRows.rows.length) return res.status(404).json({ error: 'seat not found' })
+    const seat = seatRows.rows[0]
+    if (seat.status === 'confirmed' && !seat.manual)
+      return res.status(409).json({ error: 'cannot delete a real paid booking' })
+
+    if (seat.status === 'confirmed' && seat.manual && seat.lead_phone) {
+      await query(
+        `UPDATE leads SET slot_status = NULL, paid = false, paid_at = NULL,
+                payment_status = NULL, wa_payment = NULL, updated_at = now()
+          WHERE phone = $1`,
+        [seat.lead_phone],
+      )
+    }
+    await query(`DELETE FROM slots WHERE id = $1`, [seatId])
+    res.json({ ok: true })
   }),
 )
 
@@ -666,12 +807,16 @@ adminRouter.get('/settings', (_req, res) => {
 adminRouter.get(
   '/wa/conversations',
   ah(async (_req, res) => {
+    // Only conversations with numbers we generated as leads in this app —
+    // matched on the last 10 digits (lead phones are stored without the 91).
     const { rows } = await query(
-      `SELECT t.wa_id, t.name, t.text, t.direction, t.created_at
+      `SELECT t.wa_id, COALESCE(l.name, t.name) AS name, t.text, t.direction, t.created_at
          FROM (
            SELECT DISTINCT ON (wa_id) wa_id, name, text, direction, created_at
              FROM wa_messages ORDER BY wa_id, created_at DESC
          ) t
+         JOIN leads l
+           ON right(regexp_replace(l.phone, '\\D', '', 'g'), 10) = right(t.wa_id, 10)
         ORDER BY t.created_at DESC`,
     )
     res.json({ watiConfigured: watiConfigured(), conversations: rows })

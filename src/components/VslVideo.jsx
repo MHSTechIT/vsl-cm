@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
 import { getLead, saveLead } from '../lib/session.js'
 import { openBooking } from '../lib/booking.js'
+import { trackRegistered, trackVideo15Min } from '../lib/tracking.js'
 
 const ENV_SRC = import.meta.env.VITE_VSL_SRC || '' // optional fallback
 const API_BASE = import.meta.env.VITE_API_URL || '' // prefix for /uploads in prod
@@ -47,8 +48,11 @@ function RegistrationGate({ onSubmit }) {
       setErr('Please enter your name.')
       return
     }
-    // Indian mobile: strip a leading 0/91, then require 10 digits starting 6–9.
-    const local = phone.replace(/\D/g, '').replace(/^(0+|91)/, '')
+    // Indian mobile: require 10 digits starting 6–9. Only strip a leading 0/91
+    // country code when EXTRA digits are present — never from a bare 10-digit
+    // number (e.g. 9176xxxxxx legitimately starts with "91").
+    let local = phone.replace(/\D/g, '')
+    if (local.length > 10) local = local.replace(/^(0+|91)/, '')
     if (!/^[6-9]\d{9}$/.test(local)) {
       setErr('Enter a valid 10-digit mobile number.')
       return
@@ -110,6 +114,24 @@ export default function VslVideo() {
   const lastPercentSent = useRef(0)
   const latestPercent = useRef(0)
   const unlocked = useRef(false)
+  // Cumulative *actual* watch time (sums continuous playback only, so pauses
+  // and forward seeks aren't counted) → fires the Video15Min pixel once at 900s.
+  const watchedSeconds = useRef(0)
+  const lastTick = useRef(null)
+  const video15Fired = useRef(false)
+
+  // Accumulate real watch time from a timeupdate position, then fire at 900s.
+  function accrueWatch(pos) {
+    if (lastTick.current != null) {
+      const delta = pos - lastTick.current
+      if (delta > 0 && delta < 2) watchedSeconds.current += delta // continuous play only
+    }
+    lastTick.current = pos
+    if (!video15Fired.current && watchedSeconds.current >= 900) {
+      video15Fired.current = true
+      trackVideo15Min()
+    }
+  }
 
   useEffect(() => {
     const onChange = () => setRegistered(Boolean(getLead()?.phone))
@@ -215,17 +237,25 @@ export default function VslVideo() {
       vimeoPlayerRef.current = player
       player.getMuted().then((m) => alive && setVMuted(m)).catch(() => {})
       player.on('play', () => { setVPlaying(true); setStarted(true) })
-      player.on('pause', () => { setVPlaying(false); flushProgress() })
+      player.on('pause', () => { setVPlaying(false); lastTick.current = null; flushProgress() })
       player.on('timeupdate', ({ seconds, percent }) => {
         const pct = Math.min(100, (percent || 0) * 100)
         latestPercent.current = Math.max(latestPercent.current, pct)
+        accrueWatch(seconds)
         if (pct >= 25) fire('25', pct)
         if (pct >= 50) fire('50', pct)
         if (pct >= 75) fire('75', pct)
         if (pct - lastPercentSent.current >= 5) { lastPercentSent.current = pct; fire('', pct) }
         if (seconds >= revealSeconds) unlockBooking(unlocked)
       })
-      player.on('ended', () => { setVPlaying(false); latestPercent.current = 100; fire('finished', 100); unlockBooking(unlocked) })
+      player.on('ended', () => {
+        setVPlaying(false); lastTick.current = null; latestPercent.current = 100
+        fire('finished', 100); unlockBooking(unlocked)
+        // Re-cover the player with the poster so Vimeo's "More from / related
+        // videos" end screen never shows. Reset so the play button reappears.
+        setStarted(false)
+        try { vimeoPlayerRef.current?.unload?.() } catch { /* ignore */ }
+      })
     })
     return () => {
       alive = false
@@ -238,6 +268,7 @@ export default function VslVideo() {
 
   function onTimeUpdate(e) {
     const v = e.currentTarget
+    accrueWatch(v.currentTime)
     if (v.duration) {
       const pct = playedPercent(v)
       latestPercent.current = Math.max(latestPercent.current, pct)
@@ -250,15 +281,26 @@ export default function VslVideo() {
     if (v.currentTime >= revealSeconds) unlockBooking(unlocked)
   }
 
-  // register, then start playing the video (the Submit click is the user gesture)
-  async function handleSubmit(name, phone) {
-    const { phone: saved } = await api.register(name, phone)
-    saveLead({ name, phone: saved })
+  // Start playback INSIDE the tap so iOS allows sound. iOS only honours an
+  // unmuted play() that runs synchronously within the user gesture — any await
+  // (network) or requestAnimationFrame first makes it "autoplay", which iOS is
+  // forced to mute. So we play (unmuted) first, then register in the background.
+  function handleSubmit(name, phone) {
+    saveLead({ name, phone }) // optimistic — so watch-time tracking has the phone
     setRegistered(true)
-    requestAnimationFrame(() => {
-      if (vimeoId) vimeoPlayerRef.current?.play?.().catch(() => {})
-      else videoRef.current?.play?.().catch(() => {})
-    })
+    trackRegistered() // Form 1 submitted → video unlocks
+
+    if (vimeoId) {
+      const p = vimeoPlayerRef.current
+      try { p?.setMuted?.(false); p?.setVolume?.(1) } catch { /* ignore */ }
+      p?.play?.().catch(() => {})
+    } else {
+      videoRef.current?.play?.().catch(() => {})
+    }
+    // Persist the lead without blocking the gesture (don't await before play).
+    api.register(name, phone)
+      .then(({ phone: saved }) => saveLead({ name, phone: saved }))
+      .catch(() => {})
   }
 
   // ---- custom Vimeo controls: play / mute / fullscreen ----
@@ -291,8 +333,13 @@ export default function VslVideo() {
           )}
           {registered && !started && (
             <button type="button" className="vfx-play-center" aria-label="Play video"
-              onClick={() => vimeoPlayerRef.current?.play?.().catch(() => {})}>
+              onClick={() => {
+                const p = vimeoPlayerRef.current
+                try { p?.setMuted?.(false); p?.setVolume?.(1) } catch { /* ignore */ }
+                p?.play?.().catch(() => {})
+              }}>
               <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg>
+              <span>Play Video</span>
             </button>
           )}
           {bookReady && isFs && (
@@ -322,8 +369,8 @@ export default function VslVideo() {
           playsInline
           preload="metadata"
           onTimeUpdate={onTimeUpdate}
-          onPause={() => flushProgress()}
-          onEnded={() => { latestPercent.current = 100; fire('finished', 100); unlockBooking(unlocked) }}
+          onPause={() => { lastTick.current = null; flushProgress() }}
+          onEnded={() => { lastTick.current = null; latestPercent.current = 100; fire('finished', 100); unlockBooking(unlocked) }}
         />
       ) : (
         <div
@@ -358,6 +405,7 @@ export default function VslVideo() {
               <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <path d="M8 5v14l11-7z" />
               </svg>
+              <span>Play Video</span>
             </button>
           ) : (
             <RegistrationGate onSubmit={handleSubmit} />
