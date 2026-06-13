@@ -42,12 +42,16 @@ slotsRouter.get(
         WHERE slot_date >= CURRENT_DATE
         GROUP BY slot_date, slot_time`,
     )
+    // dates the admin has switched OFF — hidden from the public calendar
+    const { rows: offDays } = await query(`SELECT slot_date FROM slot_days WHERE active = false`)
+    const hidden = new Set(offDays.map((r) => isoDate(r.slot_date)))
     const now = Date.now()
     const byDate = new Map()
     for (const r of rows) {
       const avail = Number(r.available)
       if (avail <= 0) continue
       const d = isoDate(r.slot_date)
+      if (hidden.has(d)) continue // admin turned this date off
       if (isPastSlot(d, r.slot_time, now)) continue // skip times already passed
       byDate.set(d, (byDate.get(d) || 0) + avail)
     }
@@ -70,6 +74,9 @@ slotsRouter.get(
     await releaseExpiredHolds()
     const date = String(req.query.date || '')
     if (!date) return res.status(400).json({ error: 'date required' })
+    // date switched off by the admin → no bookable times
+    const off = await query(`SELECT 1 FROM slot_days WHERE slot_date = $1 AND active = false`, [date])
+    if (off.rows.length) return res.json([])
     await applySlotDrip(date)
     const { rows } = await query(
       `SELECT slot_time,

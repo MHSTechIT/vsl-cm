@@ -2,21 +2,34 @@
 // backend (see vite.config.js). In prod set VITE_API_URL to the API origin.
 const BASE = import.meta.env.VITE_API_URL || ''
 
-// Traffic source: 'meta' when the visitor arrived from a Meta/Facebook ad
-// (fbclid or a facebook/instagram utm_source), else 'whatsapp'. Stored first-
-// touch so it survives in-session navigation.
-function getSource() {
+// Traffic source + (for Meta ads) which campaign/ad the visitor came from.
+// source is 'meta' when they arrived from a Meta/Facebook ad (fbclid or a
+// facebook/instagram utm_source), else 'whatsapp'. detail is the readable
+// "Campaign › Ad" name pulled from the ad's URL parameters — set these up on
+// the Meta ad as  utm_campaign={{campaign.name}}&utm_content={{ad.name}}
+// (Meta auto-fills those macros). Captured first-touch so it survives
+// in-session navigation.
+function getTrafficInfo() {
   try {
-    const stored = localStorage.getItem('vsl_source')
-    if (stored) return stored
+    const cached = localStorage.getItem('vsl_traffic')
+    if (cached) return JSON.parse(cached)
     const p = new URLSearchParams(window.location.search)
     const utm = (p.get('utm_source') || '').toLowerCase()
     const isMeta = p.has('fbclid') || /facebook|instagram|meta|^ig$|^fb$/.test(utm)
       || (p.get('source') || '').toLowerCase() === 'meta'
-    const src = isMeta ? 'meta' : 'whatsapp'
-    localStorage.setItem('vsl_source', src)
-    return src
-  } catch { return 'whatsapp' }
+    const source = isMeta ? 'meta' : 'whatsapp'
+    let detail = null
+    if (isMeta) {
+      const dec = (s) => (s ? decodeURIComponent(String(s).replace(/\+/g, ' ')).trim() : '')
+      const campaign = dec(p.get('utm_campaign') || p.get('campaign') || p.get('campaign_name'))
+      const ad = dec(p.get('utm_content') || p.get('ad') || p.get('ad_name') || p.get('utm_term'))
+      const parts = [campaign, ad].filter(Boolean)
+      detail = parts.length ? parts.join(' › ') : null
+    }
+    const info = { source, detail }
+    localStorage.setItem('vsl_traffic', JSON.stringify(info))
+    return info
+  } catch { return { source: 'whatsapp', detail: null } }
 }
 
 async function req(path, options = {}) {
@@ -45,8 +58,13 @@ export const api = {
   testimonials: () => req('/api/testimonials'),
 
   // Form 1
-  register: (name, phone) =>
-    req('/api/leads', { method: 'POST', body: JSON.stringify({ name, phone, source: getSource() }) }),
+  register: (name, phone) => {
+    const t = getTrafficInfo()
+    return req('/api/leads', {
+      method: 'POST',
+      body: JSON.stringify({ name, phone, source: t.source, sourceDetail: t.detail }),
+    })
+  },
 
   // watch checkpoints. keepalive lets the final percent survive tab close.
   progress: (phone, checkpoint, percent, keepalive = false) =>

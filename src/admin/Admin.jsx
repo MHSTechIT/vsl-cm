@@ -267,54 +267,127 @@ function Login({ onIn }) {
 
 // ---------- Dashboard ----------
 function Dashboard() {
-  const [s, setS] = useState(null)
-  useEffect(() => { adminApi.stats().then(setS).catch(() => {}) }, [])
+  const [leads, setLeads] = useState([])
+  const [duration, setDuration] = useState(0) // video length (seconds), for retention
+  const [range, setRange] = useState('today') // today | week | month | custom
+  const [customFrom, setCustomFrom] = useState('') // custom range start (yyyy-mm-dd)
+  const [customTo, setCustomTo] = useState('')     // custom range end (yyyy-mm-dd)
+
+  useEffect(() => { adminApi.leads().then(setLeads).catch(() => {}) }, [])
+  useEffect(() => {
+    let alive = true
+    adminApi.getConfig()
+      .then((c) => c?.vimeoId || DEFAULT_VIMEO_ID)
+      .catch(() => DEFAULT_VIMEO_ID)
+      .then((id) =>
+        fetch(`https://vimeo.com/api/oembed.json?url=https://vimeo.com/${id}`)
+          .then((r) => r.json())
+          .then((j) => { if (alive && j?.duration) setDuration(j.duration) })
+          .catch(() => {}),
+      )
+    return () => { alive = false }
+  }, [])
+
+  // one date filter drives the whole page — funnel, watch-time, retention.
+  const localDay = (ts) => {
+    const d = new Date(ts)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+  const sinceMs = (() => {
+    const now = new Date()
+    if (range === 'today') { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.getTime() }
+    if (range === 'week') return now.getTime() - 7 * 86400000
+    return now.getTime() - 30 * 86400000
+  })()
+  const inRange = leads.filter((l) => {
+    if (!l.registered_at) return false
+    if (range === 'all') return true
+    if (range === 'custom') {
+      if (!customFrom && !customTo) return false
+      const day = localDay(l.registered_at)
+      if (customFrom && day < customFrom) return false
+      if (customTo && day > customTo) return false
+      return true
+    }
+    return new Date(l.registered_at).getTime() >= sinceMs
+  })
+
+  // metrics from the filtered leads
+  const pct = (l) => Number(l.watch_percent) || 0
+  const registered = inRange.length
+  const w25 = inRange.filter((l) => pct(l) >= 25).length
+  const w50 = inRange.filter((l) => pct(l) >= 50).length
+  const w75 = inRange.filter((l) => pct(l) >= 75).length
+  const finished = inRange.filter((l) => pct(l) >= 100).length
+  const form2 = inRange.filter((l) => l.form2_submitted).length
+  const paid = inRange.filter((l) => l.paid).length
+
+  const dmy = (iso) => (iso ? iso.split('-').reverse().join('-') : '…')
+  const rangeLabel = range === 'all' ? 'all time'
+    : range === 'today' ? 'today'
+    : range === 'week' ? 'in 7 days'
+    : range === 'month' ? 'in 30 days'
+    : (customFrom || customTo) ? `${dmy(customFrom)} → ${dmy(customTo)}` : '— pick a date'
 
   return (
     <section className="adm-panel">
       <div className="adm-panel-head">
         <div>
           <h1 className="adm-h1">Overview</h1>
-          <p className="adm-sub">{s ? `${s.registered} total registrations` : 'Loading…'}</p>
+          <p className="adm-sub"><b>{registered}</b> registrations {rangeLabel}</p>
+        </div>
+        <div className="adm-chart-filters">
+          {range === 'custom' && (
+            <div className="adm-daterange">
+              <DatePicker value={customFrom} onChange={setCustomFrom} allowPast />
+              <span className="adm-daterange-to">to</span>
+              <DatePicker value={customTo} onChange={setCustomTo} allowPast />
+            </div>
+          )}
+          <div className="adm-segbtns">
+            {[['all', 'All'], ['today', 'Today'], ['week', 'Weekly'], ['month', 'Monthly'], ['custom', 'Custom date']].map(([v, label]) => (
+              <button key={v} type="button"
+                className={`adm-segbtn ${range === v ? 'is-active' : ''}`}
+                onClick={() => { setRange(v); if (v !== 'custom') { setCustomFrom(''); setCustomTo('') } }}>
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {s && (
-        <>
-          <div className="adm-block">
-            <h2 className="adm-h2">Drop-off funnel</h2>
-            <div className="adm-funnel-flex">
-              <FunnelPie
-                stages={[
-                  { label: 'Started watching', n: s.registered, of: s.registered, color: '#7c3aed' },
-                  { label: 'Watched 75%+', n: s.watch.m15, of: s.registered, color: '#f59e0b' },
-                  { label: 'Form 2 filled', n: s.form2, of: s.watch.m15, color: '#2563eb' },
-                  { label: 'Paid ₹50', n: s.paid, of: s.form2, color: '#059669' },
-                ]}
-              />
-              <div className="adm-startcard adm-startcard--side">
-                <h2 className="adm-h2">Started watching</h2>
-                <div className="adm-startcard-num">{s.registered}</div>
-                <p className="adm-startcard-sub">clicked play &amp; entered their details</p>
-              </div>
-            </div>
+      <div className="adm-block">
+        <h2 className="adm-h2">Drop-off funnel</h2>
+        <div className="adm-funnel-flex">
+          <FunnelPie
+            stages={[
+              { label: 'Started watching', n: registered, of: registered, color: '#7c3aed' },
+              { label: 'Watched 75%+', n: w75, of: registered, color: '#f59e0b' },
+              { label: 'Form 2 filled', n: form2, of: w75, color: '#2563eb' },
+              { label: 'Paid ₹50', n: paid, of: form2, color: '#059669' },
+            ]}
+          />
+          <div className="adm-startcard adm-startcard--side">
+            <h2 className="adm-h2">Started watching</h2>
+            <div className="adm-startcard-num">{registered}</div>
+            <p className="adm-startcard-sub">clicked play &amp; entered their details</p>
           </div>
+        </div>
+      </div>
 
-          <div className="adm-block">
-            <h2 className="adm-h2">Watch-time breakdown</h2>
-            <div className="adm-watch">
-              <span>25% <b>{s.watch.p25}</b></span>
-              <span>50% <b>{s.watch.m8}</b></span>
-              <span>75% <b>{s.watch.m15}</b></span>
-              <span>finished <b>{s.watch.finished}</b></span>
-            </div>
-          </div>
+      <div className="adm-block">
+        <h2 className="adm-h2">Watch-time breakdown</h2>
+        <div className="adm-watch">
+          <span>25% <b>{w25}</b></span>
+          <span>50% <b>{w50}</b></span>
+          <span>75% <b>{w75}</b></span>
+          <span>finished <b>{finished}</b></span>
+        </div>
+      </div>
 
-          <div className="adm-block">
-            <VideoRetention />
-          </div>
-        </>
-      )}
+      <div className="adm-block">
+        <VideoRetention leads={inRange} duration={duration} rangeLabel={rangeLabel} />
+      </div>
     </section>
   )
 }
@@ -341,45 +414,9 @@ function smoothPath(pts) {
 // Video retention — for each minute of the video, how many people watched at
 // least that far. Computed client-side from each lead's max watch_percent ×
 // the video's real length (Vimeo). Filterable by today / 7 days / 30 days.
-function VideoRetention() {
-  const [leads, setLeads] = useState([])
-  const [duration, setDuration] = useState(0) // seconds
-  const [range, setRange] = useState('today')
-  const [customDate, setCustomDate] = useState('') // ISO yyyy-mm-dd when range==='custom'
+function VideoRetention({ leads, duration, rangeLabel }) {
   const [hover, setHover] = useState(null) // hovered bucket index (tooltip)
-
-  useEffect(() => { adminApi.leads().then(setLeads).catch(() => {}) }, [])
-  useEffect(() => {
-    let alive = true
-    adminApi.getConfig()
-      .then((c) => c?.vimeoId || DEFAULT_VIMEO_ID)
-      .catch(() => DEFAULT_VIMEO_ID)
-      .then((id) =>
-        fetch(`https://vimeo.com/api/oembed.json?url=https://vimeo.com/${id}`)
-          .then((r) => r.json())
-          .then((j) => { if (alive && j?.duration) setDuration(j.duration) })
-          .catch(() => {}),
-      )
-    return () => { alive = false }
-  }, [])
-
-  // range → "registered since" cutoff (today = local midnight)
-  const localDay = (ts) => {
-    const d = new Date(ts)
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  }
-  const sinceMs = (() => {
-    const now = new Date()
-    if (range === 'today') { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.getTime() }
-    if (range === 'week') return now.getTime() - 7 * 86400000
-    return now.getTime() - 30 * 86400000
-  })()
-
-  const inRange = leads.filter((l) => {
-    if (!l.registered_at) return false
-    if (range === 'custom') return customDate && localDay(l.registered_at) === customDate
-    return new Date(l.registered_at).getTime() >= sinceMs
-  })
+  const inRange = leads // already date-filtered by the page-level filter
   const durMin = duration / 60
   const totalMin = durMin ? Math.max(1, Math.floor(durMin)) : 0
 
@@ -414,28 +451,9 @@ function VideoRetention() {
     <>
       <div className="adm-chart-head">
         <h2 className="adm-h2">Video retention</h2>
-        <div className="adm-chart-filters">
-          {range === 'custom' && (
-            <DatePicker value={customDate} onChange={setCustomDate} allowPast />
-          )}
-          <Dropdown
-            value={range}
-            onChange={(v) => { setRange(v); if (v !== 'custom') setCustomDate('') }}
-            options={[
-              { value: 'today', label: 'Today' },
-              { value: 'week', label: 'Weekly' },
-              { value: 'month', label: 'Monthly' },
-              { value: 'custom', label: 'Custom date' },
-            ]}
-          />
-        </div>
       </div>
       <p className="adm-sub adm-chart-sub">
-        People still watching at each minute · <b>{inRange.length}</b>{' '}
-        {range === 'today' ? 'today'
-          : range === 'week' ? 'in 7 days'
-          : range === 'month' ? 'in 30 days'
-          : customDate ? `on ${customDate.split('-').reverse().join('-')}` : '— pick a date'}
+        People still watching at each minute · <b>{inRange.length}</b> {rangeLabel}
       </p>
 
       {!duration ? (
@@ -487,7 +505,9 @@ function VideoRetention() {
             const b = buckets[hover]
             const hx = px(b.minute), hy = py(b.count)
             const label = `${b.count} ${b.count === 1 ? 'person' : 'people'}`
-            const tw = Math.max(72, label.length * 7 + 22)
+            const watchPct = durMin ? Math.min(100, Math.round((b.minute / durMin) * 100)) : 0
+            const sub = `min ${b.minute} · ${watchPct}% watched`
+            const tw = Math.max(82, label.length * 7 + 22, sub.length * 6 + 22)
             const tx = Math.max(padL, Math.min(hx - tw / 2, W - padR - tw))
             const ty = Math.max(padT + 2, hy - 50)
             return (
@@ -497,7 +517,7 @@ function VideoRetention() {
                 <g className="rc-tip">
                   <rect x={tx} y={ty} width={tw} height={38} rx="8" />
                   <text x={tx + tw / 2} y={ty + 16} textAnchor="middle" className="rc-tip-num">{label}</text>
-                  <text x={tx + tw / 2} y={ty + 30} textAnchor="middle" className="rc-tip-sub">min {b.minute}</text>
+                  <text x={tx + tw / 2} y={ty + 30} textAnchor="middle" className="rc-tip-sub">{sub}</text>
                 </g>
               </g>
             )
@@ -699,7 +719,9 @@ function Leads() {
     const head = ['Name', 'Phone', 'Source', 'Pay phone', 'Watch%', 'Watch time', 'Form2', 'Slot date & time',
       'WA payment', 'WA 1-hr', 'Registered at', 'Pay at', 'Payment status', 'HC status']
     const lines = filtered.map((r) => [
-      r.name, r.phone, r.source === 'meta' ? 'Meta' : 'WhatsApp', r.payment_phone || '', r.watch_percent,
+      r.name, r.phone,
+      r.source === 'meta' ? (r.source_detail ? `Meta: ${r.source_detail}` : 'Meta') : 'WhatsApp',
+      r.payment_phone || '', r.watch_percent,
       fmtWatchTime(r.watch_percent, duration),
       r.form2_submitted ? 'yes' : 'no',
       ((r.payment_status || (r.paid ? 'success' : null)) === 'success'
@@ -845,7 +867,10 @@ function Leads() {
                 <td className="adm-strong">{r.name}</td>
                 <td className="adm-mono">{r.phone}</td>
                 <td>{r.source === 'meta'
-                  ? <Pill c="blue">Meta</Pill>
+                  ? <span className="src-meta" title={r.source_detail || 'Meta ad'}>
+                      <Pill c="blue">Meta</Pill>
+                      <span className="src-ad">{r.source_detail || 'ad (no name set)'}</span>
+                    </span>
                   : <Pill c="green">WhatsApp</Pill>}</td>
                 <td className="adm-mono">{r.payment_phone || <span className="adm-dash">—</span>}</td>
                 <td className="adm-mono">{r.watch_percent}%</td>
@@ -1100,13 +1125,59 @@ function Slots() {
   const [ask, setAsk] = useState(null) // themed confirm dialog: { message, confirmLabel, onYes }
   const [openDay, setOpenDay] = useState(null) // only one date card expanded at a time
   const toggleDay = (d) => setOpenDay((prev) => (prev === d ? null : d))
+  // Show/hide the 1st & 2nd release cards (admin preference, persisted locally).
+  const [showReleases, setShowReleases] = useState(
+    () => localStorage.getItem('vsl_show_releases') !== '0',
+  )
+  function toggleReleases(on) {
+    setShowReleases(on)
+    localStorage.setItem('vsl_show_releases', on ? '1' : '0')
+  }
+  // Template: which time slots auto-lock on every newly-opened day.
+  const [tplOpen, setTplOpen] = useState(false)
+  const [tplLocked, setTplLocked] = useState([])
+  const [tplSeats, setTplSeats] = useState(1) // bookable seats per slot on a new day
+  const [maxSeats, setMaxSeats] = useState(1) // saved seats-per-slot cap (limits the seat editor)
+  const refreshMaxSeats = useCallback(
+    () => adminApi.slotTemplate().then((r) => setMaxSeats(r.seats || 1)).catch(() => {}),
+    [],
+  )
+  const [tplMsg, setTplMsg] = useState('')
+  const [tplBusy, setTplBusy] = useState(false)
+  function openTemplate() {
+    setTplMsg('')
+    setTplOpen(true)
+    adminApi.slotTemplate()
+      .then((r) => { setTplLocked(r.locked || []); setTplSeats(r.seats || 1) })
+      .catch(() => { setTplLocked([]); setTplSeats(1) })
+  }
+  function toggleTplTime(t) {
+    setTplLocked((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]))
+  }
+  async function saveTemplate() {
+    setTplBusy(true); setTplMsg('')
+    try {
+      const seats = Math.max(1, Math.min(20, Number(tplSeats) || 1))
+      await adminApi.saveSlotTemplate(tplLocked, seats)
+      setTplSeats(seats)
+      setMaxSeats(seats) // cap the seat editor immediately
+      setTplMsg(`Template saved — new days get ${seats} seat${seats > 1 ? 's' : ''} per slot, with the locked slots locked.`)
+    } catch (e) { setTplMsg(e.message) }
+    finally { setTplBusy(false) }
+  }
   const load = useCallback(() => adminApi.slots().then(setGroups).catch(() => {}), [])
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load(); refreshMaxSeats() }, [load, refreshMaxSeats])
 
   // Re-add a removed/missing time slot (creates one seat for that date+time).
   async function addMissingSlot(date, time) {
     setMsg('')
     try { await adminApi.addSeat(date, time); setAddSlotFor(null); load() }
+    catch (e) { setMsg(e.message) }
+  }
+  // Publish toggle — off hides the date from the customer's booking calendar.
+  async function toggleDateActive(date, active) {
+    setMsg('')
+    try { await adminApi.setDateActive(date, active); load() }
     catch (e) { setMsg(e.message) }
   }
 
@@ -1134,6 +1205,7 @@ function Slots() {
   function openSeats(d, s) {
     setSeatEdit({ date: d, time: s.time })
     setSeatList([])
+    refreshMaxSeats() // pick up the latest seats-per-slot cap from the template
     loadSeats(d, s.time)
   }
   function closeSeats() {
@@ -1206,6 +1278,19 @@ function Slots() {
           </span>
           <button className="adm-btn adm-btn-primary" type="submit">+ Open date</button>
         </form>
+
+        <div className="slot-topactions">
+          <button type="button" className="adm-btn adm-btn-ghost" onClick={openTemplate}>
+            ⧉ Template slot
+          </button>
+          <label className="slot-toggle slot-toggle--rel"
+            title={showReleases ? 'Release cards shown — click to hide' : 'Release cards hidden — click to show'}>
+            <input type="checkbox" checked={showReleases}
+              onChange={(e) => toggleReleases(e.target.checked)} />
+            <span className="slot-toggle-track"><span className="slot-toggle-knob" /></span>
+            <span className="slot-toggle-label">1st &amp; 2nd release · {showReleases ? 'On' : 'Off'}</span>
+          </label>
+        </div>
         {msg && <p className="adm-msg">{msg}</p>}
       </div>
 
@@ -1227,6 +1312,12 @@ function Slots() {
                   onClick={() => setAddSlotFor(addSlotFor === g.date ? null : g.date)}>
                   + add slot
                 </button>
+                <label className="slot-toggle" title={g.active === false ? 'Hidden from customers — click to show' : 'Showing to customers — click to hide'}>
+                  <input type="checkbox" checked={g.active !== false}
+                    onChange={(e) => toggleDateActive(g.date, e.target.checked)} />
+                  <span className="slot-toggle-track"><span className="slot-toggle-knob" /></span>
+                  <span className="slot-toggle-label">{g.active === false ? 'Off' : 'On'}</span>
+                </label>
               </div>
             )}
           </div>
@@ -1263,7 +1354,7 @@ function Slots() {
                       {s.available}/{s.capacity} left
                       {s.pending > 0 && <em className="slot-holding"> · {s.pending} holding (unpaid)</em>}
                       {s.blocked > 0 && <em className="slot-blocked"> · {s.blocked} shown booked</em>}
-                      {s.permanent > 0 && <em className="slot-permanent"> · permanently booked</em>}
+                      {s.permanent > 0 && <em className="slot-permanent"> · 🔒 locked</em>}
                     </>
                   )}
                 </span>
@@ -1276,6 +1367,7 @@ function Slots() {
             ))}
           </div>
 
+          {showReleases && (
           <div className="slot-releases">
             <ReleaseCard
               title="1st release"
@@ -1298,6 +1390,7 @@ function Slots() {
               onBlock={(t) => block(g.date, t, 2)}
             />
           </div>
+          )}
           </>)}
         </div>
         )
@@ -1309,6 +1402,7 @@ function Slots() {
           <div className="adm-dialog adm-seat-dialog" onClick={(e) => e.stopPropagation()}>
             <h3>Total seats</h3>
             <p className="adm-dialog-sub">{seatEdit.time} — assign a lead, or <b>del</b> to remove a seat</p>
+            <p className="adm-dialog-sub seat-cap-note">Max {maxSeats} seat{maxSeats > 1 ? 's' : ''} per slot (Template · Seats per slot)</p>
             {seatErr && <p className="adm-msg adm-seat-err">{seatErr}</p>}
 
             <div className="seat-rows">
@@ -1318,7 +1412,7 @@ function Slots() {
                     <b>{i + 1}</b>{' '}
                     {seat.leadName
                       ? <span className="seat-lead">{seat.leadName}{seat.locked && <em className="seat-paid"> · paid</em>}</span>
-                      : <span className="seat-empty">( {seat.status === 'available' ? 'empty' : seat.status} )</span>}
+                      : <span className="seat-empty">( {seat.status === 'available' ? 'empty' : seat.status === 'permanent' ? '🔒 locked' : seat.status} )</span>}
                   </span>
                   <span className="seat-row-actions">
                     {!seat.locked && (
@@ -1335,7 +1429,10 @@ function Slots() {
 
             <div className="adm-dialog-actions">
               <button className="adm-btn adm-btn-ghost" onClick={closeSeats}>Cancel</button>
-              <button className="adm-btn adm-btn-add" disabled={seatBusy} onClick={addSeat}>add</button>
+              <button className="adm-btn adm-btn-add"
+                disabled={seatBusy || seatList.length >= maxSeats}
+                title={seatList.length >= maxSeats ? `Max ${maxSeats} seat${maxSeats > 1 ? 's' : ''} per slot — raise it in Template` : ''}
+                onClick={addSeat}>add</button>
               <button className="adm-btn adm-btn-primary" onClick={closeSeats}>Save</button>
             </div>
           </div>
@@ -1347,6 +1444,48 @@ function Slots() {
               onClose={() => setPicker(null)}
             />
           )}
+        </div>
+      )}
+
+      {tplOpen && (
+        <div className="adm-overlay" onClick={() => setTplOpen(false)}>
+          <div className="adm-dialog adm-tpl-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Template slot</h3>
+            <p className="adm-dialog-sub">
+              Click a slot to lock it 🔒. Locked slots become the default on every new day you open.
+            </p>
+            <div className="tpl-seats">
+              <label htmlFor="tpl-seats-input">Seats per slot</label>
+              <input id="tpl-seats-input" type="number" min="1" max="20" value={tplSeats}
+                onChange={(e) => setTplSeats(e.target.value)} />
+              <span className="tpl-seats-note">how many people can book each time slot</span>
+            </div>
+            <div className="tpl-scroll">
+              <div className="slot-grid">
+                {halfHourPreset().map((t) => {
+                  const locked = tplLocked.includes(t)
+                  return (
+                    <button type="button" key={t}
+                      className={`slot-chip slot-chip--${locked ? 'permanent' : 'available'}`}
+                      onClick={() => toggleTplTime(t)}>
+                      <span className="slot-time">{t}</span>
+                      <span className="slot-seats">
+                        {locked ? '0/1 left' : '1/1 left'}
+                        {locked && <em className="slot-permanent"> · 🔒 locked</em>}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            {tplMsg && <p className="adm-msg">{tplMsg}</p>}
+            <div className="adm-dialog-actions">
+              <button className="adm-btn adm-btn-ghost" onClick={() => setTplOpen(false)}>Close</button>
+              <button className="adm-btn adm-btn-primary" disabled={tplBusy} onClick={saveTemplate}>
+                {tplBusy ? 'Saving…' : 'Save template'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1859,7 +1998,12 @@ function WatiChat() {
   }, [active, loadMsgs])
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [msgs])
 
-  function openChat(c) { setActive(c.wa_id); setActiveName(c.name || ''); setErr('') }
+  function openChat(c) {
+    setActive(c.wa_id); setActiveName(c.name || ''); setErr('')
+    // mark read → clear the unread badge (optimistic + server)
+    setConvos((cs) => cs.map((x) => (x.wa_id === c.wa_id ? { ...x, unread: 0 } : x)))
+    if (c.unread > 0) adminApi.waMarkRead(c.wa_id).catch(() => {})
+  }
 
   async function send(e) {
     e.preventDefault()
@@ -1886,7 +2030,7 @@ function WatiChat() {
           <div className="wa-list-scroll">
             {shown.length === 0 && <p className="adm-empty" style={{ fontSize: '0.85rem' }}>No conversations yet.</p>}
             {shown.map((c) => (
-              <button key={c.wa_id} className={`wa-conv ${active === c.wa_id ? 'is-active' : ''}`} onClick={() => openChat(c)}>
+              <button key={c.wa_id} className={`wa-conv ${active === c.wa_id ? 'is-active' : ''} ${c.unread > 0 ? 'has-unread' : ''}`} onClick={() => openChat(c)}>
                 <span className="wa-avatar">{(c.name || c.wa_id || '?').slice(0, 1).toUpperCase()}</span>
                 <span className="wa-conv-body">
                   <span className="wa-conv-top">
@@ -1895,6 +2039,7 @@ function WatiChat() {
                   </span>
                   <span className="wa-conv-snip">{c.direction === 'out' ? 'You: ' : ''}{c.text}</span>
                 </span>
+                {c.unread > 0 && <span className="wa-unread">{c.unread > 99 ? '99+' : c.unread}</span>}
               </button>
             ))}
           </div>

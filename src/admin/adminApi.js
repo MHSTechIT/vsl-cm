@@ -78,12 +78,17 @@ export const adminApi = {
   openDate: (date, times) =>
     req('/slots', { method: 'POST', body: JSON.stringify({ date, times }) }),
   closeDate: (date) => req('/slots/close', { method: 'POST', body: JSON.stringify({ date }) }),
+  slotTemplate: () => req('/slots/template'),
+  saveSlotTemplate: (locked, seats) =>
+    req('/slots/template', { method: 'POST', body: JSON.stringify({ locked, seats }) }),
   setSeats: (date, time, seats) =>
     req('/slots/seats', { method: 'POST', body: JSON.stringify({ date, time, seats }) }),
   slotSeats: (date, time) =>
     req(`/slots/seats?date=${encodeURIComponent(date)}&time=${encodeURIComponent(time)}`),
   addSeat: (date, time) =>
     req('/slots/seat/add', { method: 'POST', body: JSON.stringify({ date, time }) }),
+  setDateActive: (date, active) =>
+    req('/slots/date/active', { method: 'POST', body: JSON.stringify({ date, active }) }),
   assignSeat: (date, time, seatId, phone) =>
     req('/slots/seat/assign', { method: 'POST', body: JSON.stringify({ date, time, seatId, phone }) }),
   freeSeat: (date, time, seatId) =>
@@ -106,6 +111,7 @@ export const adminApi = {
   saveHc: (phone, data) =>
     req(`/leads/${encodeURIComponent(phone)}/hc`, { method: 'POST', body: JSON.stringify(data) }),
   waConversations: () => req('/wa/conversations'),
+  waMarkRead: (waId) => req(`/wa/read/${encodeURIComponent(waId)}`, { method: 'POST' }),
   waMessages: (waId) => req(`/wa/messages/${encodeURIComponent(waId)}`),
   waSend: (waId, text) => req('/wa/send', { method: 'POST', body: JSON.stringify({ waId, text }) }),
   sheets: () => req('/sheets'),

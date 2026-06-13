@@ -4,7 +4,7 @@ import multer from 'multer'
 import { query } from '../db.js'
 import { config } from '../config.js'
 import { releaseExpiredHolds } from '../lib/holds.js'
-import { applyDripAll, applySlotDrip, DAY_SEATS, DAY_OPEN } from '../lib/drip.js'
+import { applyDripAll, applySlotDrip } from '../lib/drip.js'
 import { isoDate, isPastSlot, slotStartEpoch } from './slots.js'
 import { ah } from '../lib/ah.js'
 import { setSetting, getSettings } from '../lib/settings.js'
@@ -141,7 +141,7 @@ adminRouter.get(
       `SELECT phone, name, registered_at, watch_percent, form2_submitted,
               slot_date, slot_time, slot_status, paid, paid_at, needs_wa,
               payment_phone, payment_status, wa_payment, wa_1h_sent, hc_status, hc_data,
-              rzp_payment_id, rzp_order_id, source
+              rzp_payment_id, rzp_order_id, source, source_detail
          FROM leads
         ORDER BY registered_at DESC`,
     )
@@ -330,6 +330,9 @@ adminRouter.get(
        ORDER BY slot_date, MIN(id)
     `)
     const nowMs = Date.now()
+    // per-date publish state (missing row = active)
+    const { rows: dayRows } = await query(`SELECT slot_date, active FROM slot_days`)
+    const activeMap = new Map(dayRows.map((r) => [isoDate(r.slot_date), r.active]))
     const byDate = new Map()
     for (const r of rows) {
       const d = isoDate(r.slot_date)
@@ -352,11 +355,29 @@ adminRouter.get(
     res.json(
       [...byDate.entries()].map(([date, slots]) => ({
         date,
+        active: activeMap.has(date) ? activeMap.get(date) : true,
         slots: slots.sort(
           (a, b) => (slotStartEpoch(date, a.time) ?? 0) - (slotStartEpoch(date, b.time) ?? 0),
         ),
       })),
     )
+  }),
+)
+
+// Publish toggle for a whole date. active=false hides it from the public
+// booking calendar; the admin still manages its slots.
+adminRouter.post(
+  '/slots/date/active',
+  ah(async (req, res) => {
+    const date = String(req.body?.date || '')
+    const active = Boolean(req.body?.active)
+    if (!date) return res.status(400).json({ error: 'date required' })
+    await query(
+      `INSERT INTO slot_days (slot_date, active) VALUES ($1, $2)
+       ON CONFLICT (slot_date) DO UPDATE SET active = $2`,
+      [date, active],
+    )
+    res.json({ ok: true, active })
   }),
 )
 
@@ -448,13 +469,25 @@ adminRouter.get(
   }),
 )
 
-// Add one empty seat to a (date,time).
+// Add one empty seat to a (date,time). Capped at the template's seats-per-slot:
+// you can't create more seats than "Seats per slot" allows.
 adminRouter.post(
   '/slots/seat/add',
   ah(async (req, res) => {
     const date = String(req.body?.date || '')
     const time = String(req.body?.time || '')
     if (!date || !time) return res.status(400).json({ error: 'date and time required' })
+    const tpl = await getSettings(['slot_template_seats'])
+    const maxSeats = Math.max(1, Math.min(20, parseInt(tpl.slot_template_seats, 10) || 1))
+    const { rows: cnt } = await query(
+      `SELECT COUNT(*) AS n FROM slots WHERE slot_date = $1 AND slot_time = $2`,
+      [date, time],
+    )
+    if (Number(cnt[0].n) >= maxSeats) {
+      return res
+        .status(409)
+        .json({ error: `max ${maxSeats} seat${maxSeats > 1 ? 's' : ''} per slot — raise "Seats per slot" in Template` })
+    }
     const { rows } = await query(
       `INSERT INTO slots (slot_date, slot_time) VALUES ($1, $2) RETURNING id`,
       [date, time],
@@ -553,6 +586,25 @@ adminRouter.post(
         [seat.lead_phone],
       )
     }
+
+    // If this is the LAST seat for the time, don't delete it outright — an empty
+    // time would vanish from the grid. Instead lock it (keep a single
+    // 'permanent' placeholder), so a time with no usable seats reads as locked.
+    // Use the chip's × ("remove") control to delete the time entirely.
+    const { rows: rest } = await query(
+      `SELECT COUNT(*) AS n FROM slots WHERE slot_date = $1 AND slot_time = $2 AND id <> $3`,
+      [date, time, seatId],
+    )
+    if (Number(rest[0].n) === 0) {
+      await query(
+        `UPDATE slots SET status = 'permanent', release_wave = NULL, lead_phone = NULL,
+                held_by_phone = NULL, hold_expires_at = NULL, manual = false
+          WHERE id = $1`,
+        [seatId],
+      )
+      return res.json({ ok: true, locked: true })
+    }
+
     await query(`DELETE FROM slots WHERE id = $1`, [seatId])
     res.json({ ok: true })
   }),
@@ -573,9 +625,9 @@ adminRouter.post(
   }),
 )
 
-// Open a date. The day is topped up to DAY_SEATS seats spread evenly across
-// the NEW times — DAY_OPEN of the day's seats are bookable right away, the
-// rest are created 'blocked' (shown as booked; released by the payment drip).
+// Open a date. Each NEW time gets `seatsPerSlot` bookable seats (template
+// setting, default 1), all available — the admin controls scarcity manually
+// via the per-slot editor / release cards.
 adminRouter.post(
   '/slots',
   ah(async (req, res) => {
@@ -596,39 +648,58 @@ adminRouter.post(
     }
     if (!newTimes.length) return res.json({ ok: true, created: 0, blocked: 0 })
 
-    const { rows: ex } = await query(
-      `SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status='blocked') AS blocked
-         FROM slots WHERE slot_date = $1`,
-      [date],
-    )
-    const existing = Number(ex[0].total)
-    const toCreate = Math.max(0, DAY_SEATS - existing)
-    const blockedToCreate = Math.min(
-      toCreate,
-      Math.max(0, DAY_SEATS - DAY_OPEN - Number(ex[0].blocked)),
-    )
+    // Template settings: how many bookable seats each NEW time gets (seats per
+    // slot, default 1), and which times to lock by default. Each new time is
+    // created with exactly `seatsPerSlot` available seats.
+    const tpl = await getSettings(['slot_template_locked', 'slot_template_seats'])
+    const seatsPerSlot = Math.max(1, Math.min(20, parseInt(tpl.slot_template_seats, 10) || 1))
 
-    // Spread both the seats AND the blocked share proportionally over every
-    // time, so the "already booked" slots look organic (each time partially
-    // booked; with single-seat times they alternate through the day).
-    // Blocked seats alternate between release wave 1 (opens after 5
-    // payments) and wave 2 (after 10).
     const N = newTimes.length
-    const per = (total, t) => Math.floor(((t + 1) * total) / N) - Math.floor((t * total) / N)
-    let blockedSoFar = 0
+    let created = 0
     for (let t = 0; t < N; t++) {
-      const seatsHere = per(toCreate, t)
-      const blockedHere = Math.min(seatsHere, per(blockedToCreate, t))
-      for (let k = 0; k < seatsHere; k++) {
-        const blocked = k >= seatsHere - blockedHere
-        const wave = blocked ? (blockedSoFar++ % 2) + 1 : null
+      for (let k = 0; k < seatsPerSlot; k++) {
         await query(
-          `INSERT INTO slots (slot_date, slot_time, status, release_wave) VALUES ($1, $2, $3, $4)`,
-          [date, newTimes[t], blocked ? 'blocked' : 'available', wave],
+          `INSERT INTO slots (slot_date, slot_time, status) VALUES ($1, $2, 'available')`,
+          [date, newTimes[t]],
         )
+        created++
       }
     }
-    res.json({ ok: true, created: toCreate, blocked: blockedToCreate })
+    // Apply the saved template: lock (permanent) any of the day's times the
+    // admin marked in the template, so new days start with those slots locked.
+    let tplLocked = []
+    try { tplLocked = JSON.parse(tpl.slot_template_locked || '[]') } catch { /* ignore */ }
+    if (Array.isArray(tplLocked) && tplLocked.length) {
+      await query(
+        `UPDATE slots SET status = 'permanent', release_wave = NULL
+          WHERE slot_date = $1 AND slot_time = ANY($2) AND status IN ('available', 'blocked')`,
+        [date, tplLocked],
+      )
+    }
+    res.json({ ok: true, created, blocked: 0, seatsPerSlot })
+  }),
+)
+
+// Slot template — which times are locked by default on a newly-opened day, and
+// how many bookable seats each time gets (seats per slot).
+adminRouter.get(
+  '/slots/template',
+  ah(async (_req, res) => {
+    const s = await getSettings(['slot_template_locked', 'slot_template_seats'])
+    let locked = []
+    try { locked = JSON.parse(s.slot_template_locked || '[]') } catch { /* ignore */ }
+    const seats = Math.max(1, Math.min(20, parseInt(s.slot_template_seats, 10) || 1))
+    res.json({ locked: Array.isArray(locked) ? locked : [], seats })
+  }),
+)
+adminRouter.post(
+  '/slots/template',
+  ah(async (req, res) => {
+    const locked = Array.isArray(req.body?.locked) ? req.body.locked.map(String) : []
+    const seats = Math.max(1, Math.min(20, parseInt(req.body?.seats, 10) || 1))
+    await setSetting('slot_template_locked', JSON.stringify(locked))
+    await setSetting('slot_template_seats', String(seats))
+    res.json({ ok: true, locked, seats })
   }),
 )
 
@@ -841,16 +912,38 @@ adminRouter.get(
     // Only conversations with numbers we generated as leads in this app —
     // matched on the last 10 digits (lead phones are stored without the 91).
     const { rows } = await query(
-      `SELECT t.wa_id, COALESCE(l.name, t.name) AS name, t.text, t.direction, t.created_at
+      `SELECT t.wa_id, COALESCE(l.name, t.name) AS name, t.text, t.direction, t.created_at,
+              (SELECT COUNT(*) FROM wa_messages m
+                WHERE m.wa_id = t.wa_id AND m.direction = 'in'
+                  AND m.created_at > COALESCE(rd.read_at, 'epoch'::timestamptz)) AS unread
          FROM (
            SELECT DISTINCT ON (wa_id) wa_id, name, text, direction, created_at
              FROM wa_messages ORDER BY wa_id, created_at DESC
          ) t
          JOIN leads l
            ON right(regexp_replace(l.phone, '\\D', '', 'g'), 10) = right(t.wa_id, 10)
+         LEFT JOIN wa_reads rd ON rd.wa_id = t.wa_id
         ORDER BY t.created_at DESC`,
     )
-    res.json({ watiConfigured: watiConfigured(), conversations: rows })
+    res.json({
+      watiConfigured: watiConfigured(),
+      conversations: rows.map((r) => ({ ...r, unread: Number(r.unread) })),
+    })
+  }),
+)
+
+// Mark a conversation read (clears its unread badge).
+adminRouter.post(
+  '/wa/read/:waId',
+  ah(async (req, res) => {
+    const waId = String(req.params.waId).replace(/\D/g, '')
+    if (!waId) return res.status(400).json({ error: 'waId required' })
+    await query(
+      `INSERT INTO wa_reads (wa_id, read_at) VALUES ($1, now())
+       ON CONFLICT (wa_id) DO UPDATE SET read_at = now()`,
+      [waId],
+    )
+    res.json({ ok: true })
   }),
 )
 

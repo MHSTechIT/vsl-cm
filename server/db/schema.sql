@@ -115,6 +115,21 @@ CREATE TABLE IF NOT EXISTS users (
 ALTER TABLE slots ADD COLUMN IF NOT EXISTS release_wave INTEGER;
 ALTER TABLE slots ADD COLUMN IF NOT EXISTS manual BOOLEAN NOT NULL DEFAULT false; -- admin-assigned seat (not a real Razorpay payment) — deletable, unlike paid bookings
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS source TEXT; -- 'meta' (came from a Meta/FB ad) | null/other = WhatsApp/organic
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS source_detail TEXT; -- which Meta ad/campaign (from the ad URL's utm_campaign / utm_content params)
+
+-- WATI inbox read-state: when the admin last opened each conversation. Inbound
+-- messages newer than this count as unread (shown as a badge in the chat list).
+CREATE TABLE IF NOT EXISTS wa_reads (
+  wa_id    TEXT PRIMARY KEY,
+  read_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Per-date publish toggle. active=false hides the whole date from the public
+-- booking calendar (admin still manages it). Missing row = active (default on).
+CREATE TABLE IF NOT EXISTS slot_days (
+  slot_date  DATE PRIMARY KEY,
+  active     BOOLEAN NOT NULL DEFAULT true
+);
 
 -- Idempotency log — Razorpay retries webhooks; the unique (source,event_id)
 -- gate stops the same event from being processed twice.

@@ -14,13 +14,18 @@ leadsRouter.post(
     if (!name || !phone) return res.status(400).json({ error: 'name and phone required' })
     // 'meta' when the visitor arrived from a Meta/FB ad; else WhatsApp/organic.
     const source = String(req.body?.source || '') === 'meta' ? 'meta' : null
+    // Which Meta ad/campaign they came from (only meaningful for meta leads).
+    const sourceDetail =
+      source === 'meta' ? String(req.body?.sourceDetail || '').trim().slice(0, 200) || null : null
 
     await query(
-      `INSERT INTO leads (phone, name, source)
-       VALUES ($1, $2, $3)
+      `INSERT INTO leads (phone, name, source, source_detail)
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT (phone) DO UPDATE SET name = EXCLUDED.name,
-              source = COALESCE(leads.source, EXCLUDED.source), updated_at = now()`,
-      [phone, name, source],
+              source = COALESCE(leads.source, EXCLUDED.source),
+              source_detail = COALESCE(leads.source_detail, EXCLUDED.source_detail),
+              updated_at = now()`,
+      [phone, name, source, sourceDetail],
     )
     res.json({ ok: true, phone })
     syncLeadsToSheetSafe() // keep the linked Google Sheet live (fire-and-forget)
