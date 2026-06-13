@@ -5,7 +5,7 @@ import { query } from '../db.js'
 import { config } from '../config.js'
 import { releaseExpiredHolds } from '../lib/holds.js'
 import { applyDripAll, applySlotDrip, DAY_SEATS, DAY_OPEN } from '../lib/drip.js'
-import { isoDate, isPastSlot } from './slots.js'
+import { isoDate, isPastSlot, slotStartEpoch } from './slots.js'
 import { ah } from '../lib/ah.js'
 import { setSetting, getSettings } from '../lib/settings.js'
 import { syncLeadsToSheet, spreadsheetIdFromUrl, isConfigured as googleConfigured } from '../lib/google-sheets.js'
@@ -141,12 +141,33 @@ adminRouter.get(
       `SELECT phone, name, registered_at, watch_percent, form2_submitted,
               slot_date, slot_time, slot_status, paid, paid_at, needs_wa,
               payment_phone, payment_status, wa_payment, wa_1h_sent, hc_status, hc_data,
-              rzp_payment_id, rzp_order_id
+              rzp_payment_id, rzp_order_id, source
          FROM leads
         ORDER BY registered_at DESC`,
     )
     res.json(rows.map((r) => ({ ...r, slot_date: r.slot_date ? isoDate(r.slot_date) : null })))
     backfillPayPhones(rows) // fire-and-forget — next refresh shows the numbers
+  }),
+)
+
+// Bulk-delete leads by phone. Frees any seats they hold/own (back to available)
+// so capacity isn't lost, then removes the lead rows.
+adminRouter.post(
+  '/leads/delete',
+  ah(async (req, res) => {
+    const phones = Array.isArray(req.body?.phones)
+      ? [...new Set(req.body.phones.map((p) => String(p).replace(/\D/g, '')).filter(Boolean))]
+      : []
+    if (!phones.length) return res.status(400).json({ error: 'phones[] required' })
+    await query(
+      `UPDATE slots
+          SET status = 'available', lead_phone = NULL, held_by_phone = NULL,
+              hold_expires_at = NULL, manual = false
+        WHERE lead_phone = ANY($1) OR held_by_phone = ANY($1)`,
+      [phones],
+    )
+    const { rowCount } = await query(`DELETE FROM leads WHERE phone = ANY($1)`, [phones])
+    res.json({ ok: true, deleted: rowCount })
   }),
 )
 
@@ -326,7 +347,16 @@ adminRouter.get(
         past: isPastSlot(d, r.slot_time, nowMs), // start time passed (IST) → auto-closed
       })
     }
-    res.json([...byDate.entries()].map(([date, slots]) => ({ date, slots })))
+    // Sort each day's slots by their actual start time (chronological), not by
+    // creation order — so a slot added later (e.g. 11am) still shows first.
+    res.json(
+      [...byDate.entries()].map(([date, slots]) => ({
+        date,
+        slots: slots.sort(
+          (a, b) => (slotStartEpoch(date, a.time) ?? 0) - (slotStartEpoch(date, b.time) ?? 0),
+        ),
+      })),
+    )
   }),
 )
 
@@ -470,12 +500,13 @@ adminRouter.post(
         WHERE id = $1`,
       [seatId, phone],
     )
-    // Mark the lead booked + paid.
+    // Mark the lead booked + paid, flagged 'manual' in the payment status so the
+    // Leads page distinguishes it from a real Razorpay payment.
     await query(
       `UPDATE leads
           SET slot_date = $2, slot_time = $3, slot_status = 'confirmed',
               paid = true, paid_at = COALESCE(paid_at, now()),
-              payment_status = 'success', wa_payment = 'success', updated_at = now()
+              payment_status = 'manual', wa_payment = 'success', updated_at = now()
         WHERE phone = $1`,
       [phone, date, time],
     )

@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS users (
 );
 ALTER TABLE slots ADD COLUMN IF NOT EXISTS release_wave INTEGER;
 ALTER TABLE slots ADD COLUMN IF NOT EXISTS manual BOOLEAN NOT NULL DEFAULT false; -- admin-assigned seat (not a real Razorpay payment) — deletable, unlike paid bookings
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS source TEXT; -- 'meta' (came from a Meta/FB ad) | null/other = WhatsApp/organic
 
 -- Idempotency log — Razorpay retries webhooks; the unique (source,event_id)
 -- gate stops the same event from being processed twice.

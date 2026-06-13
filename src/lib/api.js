@@ -2,6 +2,23 @@
 // backend (see vite.config.js). In prod set VITE_API_URL to the API origin.
 const BASE = import.meta.env.VITE_API_URL || ''
 
+// Traffic source: 'meta' when the visitor arrived from a Meta/Facebook ad
+// (fbclid or a facebook/instagram utm_source), else 'whatsapp'. Stored first-
+// touch so it survives in-session navigation.
+function getSource() {
+  try {
+    const stored = localStorage.getItem('vsl_source')
+    if (stored) return stored
+    const p = new URLSearchParams(window.location.search)
+    const utm = (p.get('utm_source') || '').toLowerCase()
+    const isMeta = p.has('fbclid') || /facebook|instagram|meta|^ig$|^fb$/.test(utm)
+      || (p.get('source') || '').toLowerCase() === 'meta'
+    const src = isMeta ? 'meta' : 'whatsapp'
+    localStorage.setItem('vsl_source', src)
+    return src
+  } catch { return 'whatsapp' }
+}
+
 async function req(path, options = {}) {
   const res = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
@@ -29,7 +46,7 @@ export const api = {
 
   // Form 1
   register: (name, phone) =>
-    req('/api/leads', { method: 'POST', body: JSON.stringify({ name, phone }) }),
+    req('/api/leads', { method: 'POST', body: JSON.stringify({ name, phone, source: getSource() }) }),
 
   // watch checkpoints. keepalive lets the final percent survive tab close.
   progress: (phone, checkpoint, percent, keepalive = false) =>

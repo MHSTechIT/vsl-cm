@@ -268,6 +268,16 @@
   background: none; color: var(--crm-red);
 }
 .adm-signout:hover { background: rgba(220, 38, 38, 0.08); }
+.adm-brand-logo { background: none; border: none; padding: 0; cursor: pointer; display: flex; flex: 0 0 auto; }
+
+/* ---------- collapsed (icon-only) sidebar ---------- */
+.adm-shell.is-collapsed .adm-side { width: 70px; min-width: 0; padding: 16px 10px; overflow: hidden; }
+.adm-shell.is-collapsed .adm-brand { justify-content: center; padding: 6px 0 16px; }
+.adm-shell.is-collapsed .adm-brand-text,
+.adm-shell.is-collapsed .adm-nav-label { display: none; }
+.adm-shell.is-collapsed .adm-nav button,
+.adm-shell.is-collapsed .adm-signout { justify-content: center; gap: 0; padding: 11px 0; }
+.adm-shell.is-collapsed .adm-nav button.is-active::before { display: none; }
 
 /* ---------- content ---------- */
 .adm-content { flex: 1; min-width: 0; padding: 16px 20px 50px; }
@@ -309,7 +319,13 @@
   color: var(--crm-primary);
 }
 .adm-btn-ghost:hover { background: var(--crm-surface); }
-.adm-btn-danger { background: var(--crm-red); color: #fff; box-shadow: 0 4px 20px rgba(220, 38, 38, 0.3); }
+.adm-btn-danger { background: var(--crm-red, #dc2626); color: #fff; box-shadow: 0 4px 20px rgba(220, 38, 38, 0.3); }
+.adm-btn-danger:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 26px rgba(220, 38, 38, 0.4); }
+.adm-btn-danger:disabled { opacity: 0.45; cursor: not-allowed; }
+/* multi-select delete */
+.adm-check-col { width: 36px; text-align: center; }
+.adm-check-col input { width: 16px; height: 16px; cursor: pointer; accent-color: var(--crm-primary); }
+.adm-table tr.is-selected td { background: rgba(220, 38, 38, 0.06); }
 .adm-btn-danger:hover { transform: translateY(-2px); box-shadow: 0 8px 26px rgba(220, 38, 38, 0.35); }
 
 /* ---------- stat cards ---------- */
@@ -344,6 +360,30 @@
   padding: 18px;
   background: rgba(255, 255, 255, 0.65);
 }
+/* side-by-side row: watch-time breakdown + "started watching" card */
+.adm-row2 { display: flex; gap: 14px; flex-wrap: wrap; align-items: stretch; }
+.adm-row2 .adm-block { margin-top: 18px; margin-bottom: 0; }
+.adm-row2 .adm-block--grow { flex: 1 1 360px; }
+.adm-startcard {
+  flex: 0 0 240px; display: flex; flex-direction: column; justify-content: center;
+}
+.adm-startcard .adm-h2 { margin-bottom: 8px; }
+.adm-startcard-num { color: var(--crm-primary); font-size: 2.4rem; font-weight: 800; line-height: 1; }
+.adm-startcard-sub { color: var(--crm-muted-strong); font-size: 0.8rem; margin: 7px 0 0; line-height: 1.4; }
+/* funnel + side card on one row; the card fills the right blank space */
+.adm-funnel-flex { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+.adm-funnel-flex .adm-pie { flex: 0 0 auto; flex-wrap: nowrap; }
+@media (max-width: 1100px) { .adm-funnel-flex .adm-pie { flex-wrap: wrap; } }
+.adm-startcard--side {
+  flex: 0 1 240px; min-width: 180px;
+  display: flex; flex-direction: column; justify-content: center;
+  border: 1px solid var(--crm-line); border-radius: 14px; padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.6);
+}
+.adm-startcard--side .adm-h2 { margin-bottom: 3px; font-size: 0.85rem; }
+.adm-startcard--side .adm-startcard-num { font-size: 1.9rem; }
+.adm-startcard--side .adm-startcard-sub { margin-top: 3px; font-size: 0.74rem; }
+
 .adm-funnel-row { display: flex; align-items: center; gap: 12px; margin-bottom: 11px; }
 .adm-funnel-row:last-child { margin-bottom: 0; }
 .adm-funnel-label { width: 120px; font-size: 0.8rem; font-weight: 600; color: var(--crm-label); }
@@ -360,12 +400,14 @@
   font-size: 9px; font-weight: 700; fill: var(--crm-muted-strong);
   text-transform: uppercase; letter-spacing: 0.12em;
 }
-.adm-pie-legend { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 4px; }
+.adm-pie-legend { flex: 0 1 320px; max-width: 320px; min-width: 200px; display: flex; flex-direction: column; gap: 4px; }
 .adm-pie-leg {
   display: flex; align-items: center; gap: 10px;
-  padding: 9px 12px; border-radius: 12px; background: rgba(255, 255, 255, 0.6);
+  padding: 3px 12px; border-radius: 9px; background: rgba(255, 255, 255, 0.6);
   border: 1px solid var(--crm-line);
 }
+.adm-pie-leg-label { font-size: 0.8rem; }
+.adm-pie-leg-num { font-size: 0.9rem; }
 .adm-pie-dot { width: 11px; height: 11px; flex: 0 0 11px; border-radius: 50%; }
 .adm-pie-leg-label { flex: 1; font-size: 0.82rem; font-weight: 600; color: var(--crm-label); }
 .adm-pie-leg-num { font-family: ui-monospace, monospace; font-weight: 800; color: var(--crm-deep); font-size: 0.95rem; }
@@ -385,6 +427,7 @@
 .adm-chart-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .adm-chart-head .adm-h2 { margin: 0; }
 .adm-chart-head .dd { min-width: 140px; }
+.adm-chart-filters { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 .adm-chart-sub { margin: 4px 0 14px; }
 .adm-chart-sub b { color: var(--crm-primary); font-family: ui-monospace, monospace; }
 .adm-retention { width: 100%; height: auto; display: block; border-radius: 14px; }
@@ -394,6 +437,11 @@
 .adm-retention .rc-xlab { fill: var(--crm-muted); font-size: 11px; font-family: ui-monospace, monospace; }
 .adm-retention .rc-line { fill: none; stroke: url(#rc-line); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 .adm-retention .rc-dot { fill: var(--crm-primary); stroke: #fff; stroke-width: 2; }
+.adm-retention .rc-guide { stroke: var(--crm-primary); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.45; }
+.adm-retention .rc-hover-dot { fill: var(--crm-primary); stroke: #fff; stroke-width: 2; }
+.adm-retention .rc-tip rect { fill: var(--crm-deep); }
+.adm-retention .rc-tip-num { fill: #fff; font-size: 12px; font-weight: 700; }
+.adm-retention .rc-tip-sub { fill: rgba(255, 255, 255, 0.7); font-size: 10px; font-family: ui-monospace, monospace; }
 .adm-chart-axis { text-align: center; margin: 8px 0 0; font-size: 0.75rem; font-weight: 600; color: var(--crm-muted); }
 .adm-filterbar { display: flex; gap: 9px; margin-bottom: 14px; flex-wrap: wrap; }
 .adm-filterbar input, .adm-filterbar select, .adm-openslot input {
@@ -647,6 +695,11 @@
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.75);
 }
+/* Leads: the card stays fixed in the viewport; only the rows scroll inside it */
+.leads-panel { display: flex; flex-direction: column; max-height: calc(100vh - 64px); }
+.leads-panel .adm-table-wrap { flex: 1; min-height: 0; overflow: auto; }
+.leads-panel .adm-table thead th { position: sticky; top: 0; z-index: 2; }
+@media (max-width: 760px) { .leads-panel { max-height: none; } }
 .adm-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
 .adm-table th {
   text-align: left; padding: 12px 14px;
@@ -826,17 +879,54 @@
 .adm-msg { color: var(--crm-label); font-size: 0.82rem; font-weight: 600; margin: 0 0 14px; }
 
 /* per-date slot cards */
+/* Slots panel is bare so the heading and each date stand alone as cards */
+.slots-panel {
+  background: transparent; border: none; box-shadow: none;
+  -webkit-backdrop-filter: none; backdrop-filter: none; padding: 0;
+}
+.slot-topcard {
+  background: #fff; border: 1px solid var(--crm-glass-border);
+  border-radius: 18px; padding: 20px; margin-bottom: 18px;
+  box-shadow: var(--crm-shadow-card);
+}
+.slot-topcard .adm-panel-head { margin-bottom: 16px; }
 .slot-day {
   border: 1px solid var(--crm-glass-border);
   border-radius: 18px;
   padding: 20px;
-  margin-bottom: 14px;
-  background: rgba(255, 255, 255, 0.65);
+  margin-bottom: 18px;
+  background: #fff;
+  box-shadow: var(--crm-shadow-card);
 }
-.slot-day-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.slot-day-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.slot-day.is-open .slot-day-head { margin-bottom: 16px; }
+.slot-day-toggle {
+  display: flex; align-items: center; gap: 10px; flex: 1;
+  background: none; border: none; cursor: pointer; padding: 0; text-align: left;
+}
+.slot-chev {
+  width: 18px; height: 18px; color: var(--crm-primary); flex: 0 0 18px;
+  transition: transform 0.18s ease;
+}
+.slot-chev.is-open { transform: rotate(90deg); }
+.slot-day-actions { display: flex; align-items: center; gap: 14px; }
+.adm-link--add { color: var(--crm-primary); }
+/* add-slot picker — chips of the day's removed/missing times */
+.slot-addbar {
+  display: flex; flex-wrap: wrap; gap: 8px; margin: -6px 0 16px;
+  padding: 12px; border: 1px dashed var(--crm-primary); border-radius: 12px;
+  background: rgba(91, 33, 182, 0.04);
+}
+.slot-addbar-empty { font-size: 0.82rem; color: var(--crm-muted-strong); }
+.slot-add-chip {
+  font-family: inherit; font-size: 0.78rem; font-weight: 700; cursor: pointer;
+  padding: 7px 13px; border-radius: 50px; border: 1px solid var(--crm-primary);
+  background: #fff; color: var(--crm-primary);
+}
+.slot-add-chip:hover { background: var(--crm-primary); color: #fff; }
 .slot-date {
-  margin: 0; color: var(--crm-deep); font-size: 1rem; font-weight: 800;
-  letter-spacing: 0.04em; text-align: left;
+  margin: 0; color: var(--crm-primary); font-size: 0.92rem; font-weight: 700;
+  letter-spacing: 0; text-align: left;
 }
 .slot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
 .slot-chip {
@@ -943,13 +1033,22 @@
 .adm-settings b { color: var(--crm-deep); }
 
 /* ---------- WATI inbox (WhatsApp-web layout) ---------- */
+/* Fill the viewport so the page never scrolls — the list and the message
+   thread each scroll on their own, and the conversation list stays put. */
+.wa-panel { display: flex; flex-direction: column; max-height: calc(100vh - 80px); padding-top: 14px; }
+.wa-panel .adm-panel-head { margin-bottom: 10px; }
 .wa-wrap {
   display: grid; grid-template-columns: 300px 1fr; gap: 0;
-  height: 70vh; min-height: 460px;
+  flex: 1; min-height: 0;
   border: 1px solid var(--crm-glass-border); border-radius: 16px; overflow: hidden;
   background: rgba(255,255,255,0.75);
 }
-.wa-list { border-right: 1px solid var(--crm-line); overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 4px; }
+.wa-list { border-right: 1px solid var(--crm-line); min-height: 0; padding: 10px; display: flex; flex-direction: column; }
+/* the conversation list scrolls; the search bar above it stays fixed */
+.wa-list-scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+/* hide the scrollbars (list + message thread) — scroll still works */
+.wa-list-scroll, .wa-msgs { scrollbar-width: none; -ms-overflow-style: none; }
+.wa-list-scroll::-webkit-scrollbar, .wa-msgs::-webkit-scrollbar { width: 0; height: 0; display: none; }
 .wa-search {
   width: 100%; font: inherit; font-size: 0.85rem; padding: 9px 12px; margin-bottom: 6px;
   border: 1px solid var(--crm-line); border-radius: 50px; background: var(--crm-surface); color: var(--crm-deep);
@@ -972,11 +1071,17 @@
 .wa-conv-top em { color: var(--crm-muted); font-size: 0.66rem; font-style: normal; flex: 0 0 auto; }
 .wa-conv-snip { color: var(--crm-muted-strong); font-size: 0.76rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.wa-thread { display: flex; flex-direction: column; min-width: 0; }
+.wa-thread { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .wa-empty { margin: auto; color: var(--crm-muted-strong); font-weight: 500; }
-.wa-thread-head { display: flex; align-items: center; gap: 11px; padding: 12px 16px; border-bottom: 1px solid var(--crm-line); }
-.wa-thread-head strong { display: block; color: var(--crm-deep); font-size: 0.9rem; }
-.wa-thread-num { display: block; color: var(--crm-muted); font-size: 0.72rem; }
+.wa-thread-head {
+  flex: 0 0 auto; /* pinned at the top — never scrolls or shrinks */
+  display: flex; align-items: center; gap: 9px; padding: 7px 16px;
+  border-bottom: 1px solid var(--crm-line); background: #fff;
+  border-top-right-radius: 16px;
+}
+.wa-thread-head .wa-avatar { width: 30px; height: 30px; flex: 0 0 30px; font-size: 0.8rem; }
+.wa-thread-head strong { display: block; color: var(--crm-deep); font-size: 0.8rem; line-height: 1.25; }
+.wa-thread-num { display: block; color: var(--crm-muted); font-size: 0.66rem; }
 .wa-msgs {
   flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px;
   background:
@@ -990,14 +1095,24 @@
 .wa-bubble em { font-style: normal; font-size: 0.62rem; opacity: 0.7; align-self: flex-end; }
 .wa-in  { align-self: flex-start; background: #fff; color: var(--crm-deep); border-bottom-left-radius: 4px; }
 .wa-out { align-self: flex-end; background: var(--crm-grad); color: #fff; border-bottom-right-radius: 4px; }
-.wa-compose { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--crm-line); }
+.wa-compose { flex: 0 0 auto; display: flex; gap: 8px; padding: 12px; background: var(--crm-surface); }
 .wa-compose input {
   flex: 1; font: inherit; font-size: 0.88rem; padding: 11px 16px; border-radius: 50px;
-  border: 1px solid var(--crm-line); background: var(--crm-surface); color: var(--crm-deep);
+  border: 1px solid var(--crm-line); background: transparent; color: var(--crm-deep);
 }
 .wa-compose input:focus { outline: none; border-color: var(--crm-primary); box-shadow: 0 0 0 3px rgba(91,33,182,0.1); }
+/* transparent (ghost) Send button */
+.wa-compose .adm-btn-primary {
+  background: transparent; color: var(--crm-primary);
+  border: 2px solid var(--crm-primary); box-shadow: none;
+}
+.wa-compose .adm-btn-primary:hover:not(:disabled) {
+  background: rgba(91, 33, 182, 0.08); transform: none; box-shadow: none;
+}
+.wa-compose .adm-btn-primary:disabled { opacity: 0.45; }
 @media (max-width: 720px) {
-  .wa-wrap { grid-template-columns: 1fr; height: auto; }
+  .wa-panel { max-height: none; }
+  .wa-wrap { grid-template-columns: 1fr; flex: none; height: auto; }
   .wa-list { max-height: 220px; border-right: none; border-bottom: 1px solid var(--crm-line); }
   .wa-thread { min-height: 360px; }
 }

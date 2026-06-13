@@ -38,7 +38,7 @@ const Icon = {
   slots: <path d="M7 2v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2H7zm12 8v10H5V10h14z" />,
   settings: <path d="M19.4 13a7.8 7.8 0 0 0 .1-1 7.8 7.8 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7.3 7.3 0 0 0-1.7-1l-.4-2.5H9.1l-.4 2.5a7.3 7.3 0 0 0-1.7 1l-2.4-1-2 3.4L4.6 11a7.8 7.8 0 0 0 0 2l-2 1.6 2 3.4 2.4-1c.5.4 1.1.7 1.7 1l.4 2.5h5.8l.4-2.5c.6-.3 1.2-.6 1.7-1l2.4 1 2-3.4-2-1.6zM12 15.5A3.5 3.5 0 1 1 15.5 12 3.5 3.5 0 0 1 12 15.5z" />,
   upload: <path d="M11 16V7.8L8.4 10.4 7 9l5-5 5 5-1.4 1.4L13 7.8V16h-2zM5 18h14v2H5v-2z" />,
-  users: <path d="M16 11a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm-8 0a3 3 0 1 0-3-3 3 3 0 0 0 3 3zm0 2c-2.7 0-8 1.3-8 4v3h9v-3c0-1 .4-1.9 1-2.6A13 13 0 0 0 8 13zm8 0c-.3 0-.7 0-1.1.1A5 5 0 0 1 18 17v3h6v-3c0-2.7-5.3-4-8-4z" />,
+  users: <path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5zm0 2c-3.33 0-10 1.67-10 5v3h20v-3c0-3.33-6.67-5-10-5z" />,
   wati: <path d="M12 3C6.5 3 2 6.9 2 11.7c0 2.5 1.2 4.7 3.2 6.3L4 22l4.3-1.5c1.1.3 2.4.5 3.7.5 5.5 0 10-3.9 10-8.8S17.5 3 12 3z" />,
 }
 const NavIcon = ({ name }) => (
@@ -87,7 +87,7 @@ function Dropdown({ value, onChange, options }) {
 
 // ---------- Custom date picker (on-theme, replaces native date input) ----------
 const WEEKDAYS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']
-function DatePicker({ value, onChange }) {
+function DatePicker({ value, onChange, allowPast = false }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
   const base = value ? new Date(value + 'T00:00:00') : new Date()
@@ -145,7 +145,7 @@ function DatePicker({ value, onChange }) {
                 <button
                   key={i}
                   type="button"
-                  disabled={past}
+                  disabled={past && !allowPast}
                   className={`dp-day ${cellISO === value ? 'is-sel' : ''} ${cellISO === todayISO ? 'is-today' : ''}`}
                   onClick={() => { onChange(cellISO); setOpen(false) }}
                 >{d}</button>
@@ -283,14 +283,21 @@ function Dashboard() {
         <>
           <div className="adm-block">
             <h2 className="adm-h2">Drop-off funnel</h2>
-            <FunnelPie
-              stages={[
-                { label: 'Registered', n: s.registered, of: s.registered, color: '#7c3aed' },
-                { label: 'Watched 75%+', n: s.watch.m15, of: s.registered, color: '#f59e0b' },
-                { label: 'Form 2 filled', n: s.form2, of: s.watch.m15, color: '#2563eb' },
-                { label: 'Paid ₹50', n: s.paid, of: s.form2, color: '#059669' },
-              ]}
-            />
+            <div className="adm-funnel-flex">
+              <FunnelPie
+                stages={[
+                  { label: 'Started watching', n: s.registered, of: s.registered, color: '#7c3aed' },
+                  { label: 'Watched 75%+', n: s.watch.m15, of: s.registered, color: '#f59e0b' },
+                  { label: 'Form 2 filled', n: s.form2, of: s.watch.m15, color: '#2563eb' },
+                  { label: 'Paid ₹50', n: s.paid, of: s.form2, color: '#059669' },
+                ]}
+              />
+              <div className="adm-startcard adm-startcard--side">
+                <h2 className="adm-h2">Started watching</h2>
+                <div className="adm-startcard-num">{s.registered}</div>
+                <p className="adm-startcard-sub">clicked play &amp; entered their details</p>
+              </div>
+            </div>
           </div>
 
           <div className="adm-block">
@@ -338,6 +345,8 @@ function VideoRetention() {
   const [leads, setLeads] = useState([])
   const [duration, setDuration] = useState(0) // seconds
   const [range, setRange] = useState('today')
+  const [customDate, setCustomDate] = useState('') // ISO yyyy-mm-dd when range==='custom'
+  const [hover, setHover] = useState(null) // hovered bucket index (tooltip)
 
   useEffect(() => { adminApi.leads().then(setLeads).catch(() => {}) }, [])
   useEffect(() => {
@@ -355,6 +364,10 @@ function VideoRetention() {
   }, [])
 
   // range → "registered since" cutoff (today = local midnight)
+  const localDay = (ts) => {
+    const d = new Date(ts)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
   const sinceMs = (() => {
     const now = new Date()
     if (range === 'today') { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.getTime() }
@@ -362,7 +375,11 @@ function VideoRetention() {
     return now.getTime() - 30 * 86400000
   })()
 
-  const inRange = leads.filter((l) => l.registered_at && new Date(l.registered_at).getTime() >= sinceMs)
+  const inRange = leads.filter((l) => {
+    if (!l.registered_at) return false
+    if (range === 'custom') return customDate && localDay(l.registered_at) === customDate
+    return new Date(l.registered_at).getTime() >= sinceMs
+  })
   const durMin = duration / 60
   const totalMin = durMin ? Math.max(1, Math.floor(durMin)) : 0
 
@@ -397,18 +414,28 @@ function VideoRetention() {
     <>
       <div className="adm-chart-head">
         <h2 className="adm-h2">Video retention</h2>
-        <Dropdown
-          value={range}
-          onChange={setRange}
-          options={[
-            { value: 'today', label: 'Today' },
-            { value: 'week', label: 'Weekly' },
-            { value: 'month', label: 'Monthly' },
-          ]}
-        />
+        <div className="adm-chart-filters">
+          {range === 'custom' && (
+            <DatePicker value={customDate} onChange={setCustomDate} allowPast />
+          )}
+          <Dropdown
+            value={range}
+            onChange={(v) => { setRange(v); if (v !== 'custom') setCustomDate('') }}
+            options={[
+              { value: 'today', label: 'Today' },
+              { value: 'week', label: 'Weekly' },
+              { value: 'month', label: 'Monthly' },
+              { value: 'custom', label: 'Custom date' },
+            ]}
+          />
+        </div>
       </div>
       <p className="adm-sub adm-chart-sub">
-        People still watching at each minute · <b>{inRange.length}</b> {range === 'today' ? 'today' : range === 'week' ? 'in 7 days' : 'in 30 days'}
+        People still watching at each minute · <b>{inRange.length}</b>{' '}
+        {range === 'today' ? 'today'
+          : range === 'week' ? 'in 7 days'
+          : range === 'month' ? 'in 30 days'
+          : customDate ? `on ${customDate.split('-').reverse().join('-')}` : '— pick a date'}
       </p>
 
       {!duration ? (
@@ -454,6 +481,38 @@ function VideoRetention() {
           {buckets.filter((b) => b.minute % xLabelEvery === 0 || b.minute === 1).map((b) => (
             <text key={b.minute} x={px(b.minute)} y={H - 8} className="rc-xlab" textAnchor="middle">{b.minute}</text>
           ))}
+
+          {/* hover marker + tooltip */}
+          {hover != null && buckets[hover] && (() => {
+            const b = buckets[hover]
+            const hx = px(b.minute), hy = py(b.count)
+            const label = `${b.count} ${b.count === 1 ? 'person' : 'people'}`
+            const tw = Math.max(72, label.length * 7 + 22)
+            const tx = Math.max(padL, Math.min(hx - tw / 2, W - padR - tw))
+            const ty = Math.max(padT + 2, hy - 50)
+            return (
+              <g pointerEvents="none">
+                <line x1={hx} y1={padT} x2={hx} y2={padT + plotH} className="rc-guide" />
+                <circle cx={hx} cy={hy} r="5" className="rc-hover-dot" />
+                <g className="rc-tip">
+                  <rect x={tx} y={ty} width={tw} height={38} rx="8" />
+                  <text x={tx + tw / 2} y={ty + 16} textAnchor="middle" className="rc-tip-num">{label}</text>
+                  <text x={tx + tw / 2} y={ty + 30} textAnchor="middle" className="rc-tip-sub">min {b.minute}</text>
+                </g>
+              </g>
+            )
+          })()}
+
+          {/* invisible columns capture the cursor for each minute */}
+          <g onMouseLeave={() => setHover(null)}>
+            {buckets.map((b, i) => {
+              const colW = totalMin > 1 ? plotW / (totalMin - 1) : plotW
+              return (
+                <rect key={b.minute} x={px(b.minute) - colW / 2} y={padT} width={colW} height={plotH}
+                  fill="transparent" onMouseEnter={() => setHover(i)} style={{ cursor: 'crosshair' }} />
+              )
+            })}
+          </g>
         </svg>
       )}
       {duration > 0 && inRange.length > 0 && (
@@ -573,9 +632,15 @@ function Leads() {
   const [rows, setRows] = useState([])
   const [filter, setFilter] = useState('all')
   const [q, setQ] = useState('')
+  const [dateMode, setDateMode] = useState('all') // all | today | custom
+  const [customDate, setCustomDate] = useState('') // ISO yyyy-mm-dd when dateMode==='custom'
+  const [heat, setHeat] = useState('all') // watch-time bucket: all|superhot|hot|warm|cold|registered
   const [hcEdit, setHcEdit] = useState(null) // the lead row being HC-edited
   const [duration, setDuration] = useState(0) // total video length (seconds)
   const [page, setPage] = useState(1) // current page (1-based)
+  const [selectMode, setSelectMode] = useState(false) // multi-select-to-delete
+  const [selected, setSelected] = useState(() => new Set()) // chosen lead phones
+  const [deleting, setDeleting] = useState(false)
   const load = useCallback(() => adminApi.leads().then(setRows).catch(() => {}), [])
   useEffect(() => { load() }, [load])
 
@@ -595,8 +660,27 @@ function Leads() {
     return () => { alive = false }
   }, [])
 
+  // Local calendar day (yyyy-mm-dd) of a timestamp, for date filtering.
+  const localDay = (ts) => {
+    const d = new Date(ts)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+  const todayDay = localDay(Date.now())
+
   const filtered = rows.filter((r) => {
     if (q && !`${r.name} ${r.phone}`.toLowerCase().includes(q.toLowerCase())) return false
+    // registration-date filter
+    if (dateMode === 'today' && (!r.registered_at || localDay(r.registered_at) !== todayDay)) return false
+    if (dateMode === 'custom' && customDate && (!r.registered_at || localDay(r.registered_at) !== customDate)) return false
+    // watch-time "heat" filter
+    if (heat !== 'all') {
+      const p = Number(r.watch_percent) || 0
+      if (heat === 'superhot' && p !== 100) return false
+      if (heat === 'hot' && !(p >= 75 && p < 100)) return false
+      if (heat === 'warm' && !(p >= 50 && p <= 74)) return false
+      if (heat === 'cold' && !(p >= 25 && p <= 49)) return false
+      if (heat === 'registered' && !(p >= 0 && p <= 24)) return false
+    }
     if (filter === 'paid') return r.paid
     if (filter === 'unpaid') return !r.paid
     if (filter === 'needs-wa') return Boolean(r.needs_wa)
@@ -605,22 +689,25 @@ function Leads() {
   })
 
   // Paginate — 10 leads per page. Jump back to page 1 whenever the search or
-  // filter changes so we never land on a now-empty page.
-  useEffect(() => { setPage(1) }, [q, filter])
+  // any filter changes so we never land on a now-empty page.
+  useEffect(() => { setPage(1) }, [q, filter, dateMode, customDate, heat])
   const pageCount = Math.max(1, Math.ceil(filtered.length / LEADS_PER_PAGE))
   const safePage = Math.min(page, pageCount)
   const pageRows = filtered.slice((safePage - 1) * LEADS_PER_PAGE, safePage * LEADS_PER_PAGE)
 
   function exportCsv() {
-    const head = ['Name', 'Phone', 'Pay phone', 'Watch%', 'Watch time', 'Form2', 'Slot date & time',
-      'WA payment', 'WA 1-hr', 'Registered at', 'Payment status', 'HC status']
+    const head = ['Name', 'Phone', 'Source', 'Pay phone', 'Watch%', 'Watch time', 'Form2', 'Slot date & time',
+      'WA payment', 'WA 1-hr', 'Registered at', 'Pay at', 'Payment status', 'HC status']
     const lines = filtered.map((r) => [
-      r.name, r.phone, r.payment_phone || '', r.watch_percent,
+      r.name, r.phone, r.source === 'meta' ? 'Meta' : 'WhatsApp', r.payment_phone || '', r.watch_percent,
       fmtWatchTime(r.watch_percent, duration),
       r.form2_submitted ? 'yes' : 'no',
-      r.slot_date ? `${r.slot_date} ${r.slot_time}` : '',
+      ((r.payment_status || (r.paid ? 'success' : null)) === 'success'
+        || (r.payment_status || (r.paid ? 'success' : null)) === 'manual') && r.slot_date
+        ? `${r.slot_date} ${r.slot_time}` : '',
       r.wa_payment || '',
       r.wa_1h_sent ? 'yes' : 'no',
+      r.registered_at ? r.registered_at.slice(0, 19).replace('T', ' ') : '',
       r.paid_at ? r.paid_at.slice(0, 19).replace('T', ' ') : '',
       r.payment_status || (r.paid ? 'success' : ''),
       hcStatusOf(r).label,
@@ -634,16 +721,59 @@ function Leads() {
     URL.revokeObjectURL(url)
   }
 
+  const toggleSelect = (phone) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      next.has(phone) ? next.delete(phone) : next.add(phone)
+      return next
+    })
+  const pageAllSelected = pageRows.length > 0 && pageRows.every((r) => selected.has(r.phone))
+  const toggleSelectPage = () =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (pageAllSelected) pageRows.forEach((r) => next.delete(r.phone))
+      else pageRows.forEach((r) => next.add(r.phone))
+      return next
+    })
+  function exitSelect() { setSelectMode(false); setSelected(new Set()) }
+  async function doDelete() {
+    const phones = [...selected]
+    if (!phones.length) return
+    if (!confirm(`Delete ${phones.length} lead(s)? This cannot be undone and frees their seats.`)) return
+    setDeleting(true)
+    try {
+      await adminApi.deleteLeads(phones)
+      exitSelect()
+      await load()
+    } catch (e) {
+      alert(`Delete failed: ${e.message}`)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   return (
-    <section className="adm-panel">
+    <section className="adm-panel leads-panel">
       <div className="adm-panel-head">
         <div>
           <h1 className="adm-h1">Lead registry</h1>
           <p className="adm-sub"><b>{rows.length}</b> total registrations</p>
         </div>
         <div className="adm-actions">
-          <button className="adm-btn adm-btn-ghost" onClick={load}>Refresh</button>
-          <button className="adm-btn adm-btn-primary" onClick={exportCsv}>↓ Export CSV</button>
+          {selectMode ? (
+            <>
+              <button className="adm-btn adm-btn-ghost" onClick={exitSelect}>Cancel</button>
+              <button className="adm-btn adm-btn-danger" disabled={!selected.size || deleting} onClick={doDelete}>
+                {deleting ? 'Deleting…' : `🗑 Delete (${selected.size})`}
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="adm-btn adm-btn-ghost" onClick={load}>Refresh</button>
+              <button className="adm-btn adm-btn-primary" onClick={exportCsv}>↓ Export CSV</button>
+              <button className="adm-btn adm-btn-danger" onClick={() => setSelectMode(true)}>🗑 Delete</button>
+            </>
+          )}
         </div>
       </div>
 
@@ -660,38 +790,81 @@ function Leads() {
             { value: 'hold', label: 'On hold' },
           ]}
         />
+        <Dropdown
+          value={dateMode}
+          onChange={(v) => { setDateMode(v); if (v !== 'custom') setCustomDate('') }}
+          options={[
+            { value: 'all', label: 'All dates' },
+            { value: 'today', label: 'Today' },
+            { value: 'custom', label: 'Custom date' },
+          ]}
+        />
+        {dateMode === 'custom' && (
+          <DatePicker value={customDate} onChange={setCustomDate} allowPast />
+        )}
+        <Dropdown
+          value={heat}
+          onChange={setHeat}
+          options={[
+            { value: 'all', label: 'All watch-time' },
+            { value: 'superhot', label: '🔥 Super Hot (100%)' },
+            { value: 'hot', label: 'Hot (75–99%)' },
+            { value: 'warm', label: 'Warm (50–74%)' },
+            { value: 'cold', label: 'Cold (25–49%)' },
+            { value: 'registered', label: 'Registered (0–24%)' },
+          ]}
+        />
       </div>
 
       <div className="adm-table-wrap">
         <table className="adm-table">
           <thead>
             <tr>
-              <th>Name</th><th>Phone</th><th>Pay phone</th><th>Watch</th><th>Watch time</th><th>Form 2</th>
+              {selectMode && (
+                <th className="adm-check-col">
+                  <input type="checkbox" checked={pageAllSelected} onChange={toggleSelectPage}
+                    aria-label="Select all on page" />
+                </th>
+              )}
+              <th>Name</th><th>Phone</th><th>Source</th><th>Pay phone</th><th>Watch</th><th>Watch time</th><th>Form 2</th>
               <th>Slot date &amp; time</th><th>WA payment</th><th>WA 1-hr</th>
-              <th>Registered at</th><th>Payment status</th><th>HC status</th><th>Edit</th>
+              <th>Registered at</th><th>Pay at</th><th>Payment status</th><th>HC status</th><th>Edit</th>
             </tr>
           </thead>
           <tbody>
             {pageRows.map((r) => {
               const payStatus = r.payment_status || (r.paid ? 'success' : null)
               return (
-              <tr key={r.phone}>
+              <tr key={r.phone} className={selectMode && selected.has(r.phone) ? 'is-selected' : ''}>
+                {selectMode && (
+                  <td className="adm-check-col">
+                    <input type="checkbox" checked={selected.has(r.phone)}
+                      onChange={() => toggleSelect(r.phone)} aria-label={`Select ${r.name}`} />
+                  </td>
+                )}
                 <td className="adm-strong">{r.name}</td>
                 <td className="adm-mono">{r.phone}</td>
+                <td>{r.source === 'meta'
+                  ? <Pill c="blue">Meta</Pill>
+                  : <Pill c="green">WhatsApp</Pill>}</td>
                 <td className="adm-mono">{r.payment_phone || <span className="adm-dash">—</span>}</td>
                 <td className="adm-mono">{r.watch_percent}%</td>
                 <td className="adm-mono">{fmtWatchTime(r.watch_percent, duration)}</td>
                 <td>{r.form2_submitted ? <Pill c="blue">Yes</Pill> : <span className="adm-dash">—</span>}</td>
-                <td>{r.slot_date ? `${fmtDate(r.slot_date)} · ${r.slot_time}` : <span className="adm-dash">—</span>}</td>
+                <td>{(payStatus === 'success' || payStatus === 'manual') && r.slot_date
+                  ? `${fmtDate(r.slot_date)} · ${r.slot_time}`
+                  : <span className="adm-dash">—</span>}</td>
                 <td>
                   {r.wa_payment === 'success' ? <Pill c="green">Success</Pill>
                     : r.wa_payment === 'failed' ? <Pill c="red">Failed</Pill>
                     : <span className="adm-dash">—</span>}
                 </td>
                 <td>{r.wa_1h_sent ? <Pill c="green">Yes</Pill> : <Pill c="grey">No</Pill>}</td>
+                <td>{r.registered_at ? fmtDateTime(r.registered_at) : <span className="adm-dash">—</span>}</td>
                 <td>{r.paid_at ? fmtDateTime(r.paid_at) : <span className="adm-dash">—</span>}</td>
                 <td>
                   {payStatus === 'success' ? <Pill c="green">Success</Pill>
+                    : payStatus === 'manual' ? <Pill c="amber">Manual</Pill>
                     : payStatus === 'failed' ? <Pill c="red">Failed</Pill>
                     : <span className="adm-dash">—</span>}
                 </td>
@@ -707,7 +880,7 @@ function Leads() {
               </tr>
               )
             })}
-            {filtered.length === 0 && <tr><td colSpan="13" className="adm-empty">No leads yet.</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={selectMode ? 16 : 15} className="adm-empty">No leads yet.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -923,8 +1096,19 @@ function Slots() {
   const [seatBusy, setSeatBusy] = useState(false)
   const [seatErr, setSeatErr] = useState('')
   const [picker, setPicker] = useState(null)     // seat being manually assigned
+  const [addSlotFor, setAddSlotFor] = useState(null) // date whose "add slot" picker is open
+  const [ask, setAsk] = useState(null) // themed confirm dialog: { message, confirmLabel, onYes }
+  const [openDay, setOpenDay] = useState(null) // only one date card expanded at a time
+  const toggleDay = (d) => setOpenDay((prev) => (prev === d ? null : d))
   const load = useCallback(() => adminApi.slots().then(setGroups).catch(() => {}), [])
   useEffect(() => { load() }, [load])
+
+  // Re-add a removed/missing time slot (creates one seat for that date+time).
+  async function addMissingSlot(date, time) {
+    setMsg('')
+    try { await adminApi.addSeat(date, time); setAddSlotFor(null); load() }
+    catch (e) { setMsg(e.message) }
+  }
 
   const loadSeats = useCallback((d, t) => {
     setSeatErr('')
@@ -981,13 +1165,19 @@ function Slots() {
     } catch (e) { setSeatErr(e.message) }
     finally { setSeatBusy(false) }
   }
-  async function removeTime(d, time) {
-    if (!confirm(`Remove the ${time} slot?`)) return
-    await adminApi.removeTime(d, time); load()
+  function removeTime(d, time) {
+    setAsk({
+      message: `Remove the ${time} slot?`,
+      confirmLabel: 'Remove',
+      onYes: async () => { await adminApi.removeTime(d, time); load() },
+    })
   }
-  async function closeDate(d) {
-    if (!confirm(`Remove all non-confirmed slots on ${fmtDot(d)}?`)) return
-    await adminApi.closeDate(d); load()
+  function closeDate(d) {
+    setAsk({
+      message: `Remove all non-confirmed slots on ${fmtDot(d)}?`,
+      confirmLabel: 'Clear date',
+      onYes: async () => { await adminApi.closeDate(d); load() },
+    })
   }
   const chipClass = (s) =>
     s.past ? 'past'
@@ -1003,26 +1193,59 @@ function Slots() {
   }
 
   return (
-    <section className="adm-panel">
-      <div className="adm-panel-head">
-        <div><h1 className="adm-h1">Slot management</h1><p className="adm-sub">Open dates and manage the time slots shown on the booking form</p></div>
+    <section className="adm-panel slots-panel">
+      <div className="slot-topcard">
+        <div className="adm-panel-head">
+          <div><h1 className="adm-h1">Slot management</h1><p className="adm-sub">Open dates and manage the time slots shown on the booking form</p></div>
+        </div>
+
+        <form className="adm-openslot" onSubmit={openDate}>
+          <DatePicker value={date} onChange={setDate} />
+          <span className="adm-openslot-note">
+            20 half-hour slots · 10.00am – 8.00pm · 10 open, 10 shown as booked
+          </span>
+          <button className="adm-btn adm-btn-primary" type="submit">+ Open date</button>
+        </form>
+        {msg && <p className="adm-msg">{msg}</p>}
       </div>
 
-      <form className="adm-openslot" onSubmit={openDate}>
-        <DatePicker value={date} onChange={setDate} />
-        <span className="adm-openslot-note">
-          20 half-hour slots · 10.00am – 8.00pm · 10 open, 10 shown as booked
-        </span>
-        <button className="adm-btn adm-btn-primary" type="submit">+ Open date</button>
-      </form>
-      {msg && <p className="adm-msg">{msg}</p>}
-
-      {groups.map((g) => (
-        <div className="slot-day" key={g.date}>
+      {groups.map((g) => {
+        const isOpen = openDay === g.date
+        return (
+        <div className={`slot-day ${isOpen ? 'is-open' : ''}`} key={g.date}>
           <div className="slot-day-head">
-            <h3 className="slot-date">DATE : {fmtDot(g.date)}</h3>
-            <button className="adm-link" onClick={() => closeDate(g.date)}>clear date</button>
+            <button type="button" className="slot-day-toggle" onClick={() => toggleDay(g.date)}>
+              <svg className={`slot-chev ${isOpen ? 'is-open' : ''}`} viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M9 6l6 6-6 6" />
+              </svg>
+              <h3 className="slot-date">DATE : {fmtDot(g.date)}</h3>
+            </button>
+            {isOpen && (
+              <div className="slot-day-actions">
+                <button className="adm-link adm-link--add"
+                  onClick={() => setAddSlotFor(addSlotFor === g.date ? null : g.date)}>
+                  + add slot
+                </button>
+              </div>
+            )}
           </div>
+          {isOpen && (<>
+          {addSlotFor === g.date && (() => {
+            const present = new Set(g.slots.map((s) => s.time))
+            const missing = halfHourPreset().filter((t) => !present.has(t))
+            return (
+              <div className="slot-addbar">
+                {missing.length === 0
+                  ? <span className="slot-addbar-empty">All time slots are already open for this day.</span>
+                  : missing.map((t) => (
+                    <button key={t} className="slot-add-chip" onClick={() => addMissingSlot(g.date, t)}>
+                      + {t}
+                    </button>
+                  ))}
+              </div>
+            )
+          })()}
           <div className="slot-grid">
             {g.slots.map((s) => (
               <button
@@ -1075,8 +1298,10 @@ function Slots() {
               onBlock={(t) => block(g.date, t, 2)}
             />
           </div>
+          </>)}
         </div>
-      ))}
+        )
+      })}
       {groups.length === 0 && <p className="adm-empty">No dates open yet.</p>}
 
       {seatEdit && (
@@ -1122,6 +1347,22 @@ function Slots() {
               onClose={() => setPicker(null)}
             />
           )}
+        </div>
+      )}
+
+      {ask && (
+        <div className="adm-overlay" onClick={() => setAsk(null)}>
+          <div className="adm-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Please confirm</h3>
+            <p className="adm-dialog-sub">{ask.message}</p>
+            <div className="adm-dialog-actions">
+              <button className="adm-btn adm-btn-ghost" onClick={() => setAsk(null)}>Cancel</button>
+              <button className="adm-btn adm-btn-danger"
+                onClick={async () => { const fn = ask.onYes; setAsk(null); await fn() }}>
+                {ask.confirmLabel || 'Confirm'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </section>
@@ -1240,43 +1481,12 @@ function Upload() {
       <div className="adm-panel-head">
         <div>
           <h1 className="adm-h1">Upload</h1>
-          <p className="adm-sub">Video &amp; thumbnail upload as soon as you choose them. Save stores the booking timing.</p>
+          <p className="adm-sub">Set the Vimeo video link and the booking-button reveal time.</p>
         </div>
       </div>
 
       <div className="up-cardgrid">
         <div className="up-card">
-          <div className="up-row">
-            {/* video — uploads on select */}
-            <label className="up-tile">
-              <input type="file" accept="video/*" hidden disabled={vProg != null}
-                onChange={(e) => uploadFile('video', e.target.files[0], setVProg)} />
-              <span className="up-tile-title">Video</span>
-              {vProg != null ? (
-                <UploadTileProgress p={vProg} />
-              ) : (
-                <span className="up-tile-sub">
-                  {cfg?.videoId ? '✓ uploaded — click to replace' : 'Click to upload'}
-                </span>
-              )}
-            </label>
-
-            {/* thumbnail — uploads on select */}
-            <label className="up-tile up-tile--thumb"
-              style={thumbPreview && tProg == null ? { backgroundImage: `url(${thumbPreview})` } : undefined}>
-              <input type="file" accept="image/*" hidden disabled={tProg != null}
-                onChange={(e) => uploadFile('thumb', e.target.files[0], setTProg)} />
-              {tProg != null ? (
-                <UploadTileProgress p={tProg} />
-              ) : !thumbPreview ? (
-                <>
-                  <span className="up-tile-title">Thumbnail</span>
-                  <span className="up-tile-sub">Click to upload</span>
-                </>
-              ) : null}
-            </label>
-          </div>
-
           {err && <p className="reg-error" style={{ textAlign: 'center' }}>{err}</p>}
 
           {/* Vimeo link — when set, the page plays from Vimeo (off the database) */}
@@ -1670,31 +1880,24 @@ function WatiChat() {
 
   return (
     <section className="adm-panel wa-panel">
-      <div className="adm-panel-head">
-        <div>
-          <h1 className="adm-h1">WhatsApp inbox</h1>
-          <p className="adm-sub">
-            {configured ? 'Replies go to the customer’s WhatsApp via WATI.' : 'WATI not configured — set WATI_TOKEN + WATI_BASE_URL.'}
-          </p>
-        </div>
-      </div>
-
       <div className="wa-wrap">
         <aside className="wa-list">
           <input className="wa-search" placeholder="Search chats" value={q} onChange={(e) => setQ(e.target.value)} />
-          {shown.length === 0 && <p className="adm-empty" style={{ fontSize: '0.85rem' }}>No conversations yet.</p>}
-          {shown.map((c) => (
-            <button key={c.wa_id} className={`wa-conv ${active === c.wa_id ? 'is-active' : ''}`} onClick={() => openChat(c)}>
-              <span className="wa-avatar">{(c.name || c.wa_id || '?').slice(0, 1).toUpperCase()}</span>
-              <span className="wa-conv-body">
-                <span className="wa-conv-top">
-                  <b>{c.name || c.wa_id}</b>
-                  <em>{fmtTime(c.created_at).split(',')[0]}</em>
+          <div className="wa-list-scroll">
+            {shown.length === 0 && <p className="adm-empty" style={{ fontSize: '0.85rem' }}>No conversations yet.</p>}
+            {shown.map((c) => (
+              <button key={c.wa_id} className={`wa-conv ${active === c.wa_id ? 'is-active' : ''}`} onClick={() => openChat(c)}>
+                <span className="wa-avatar">{(c.name || c.wa_id || '?').slice(0, 1).toUpperCase()}</span>
+                <span className="wa-conv-body">
+                  <span className="wa-conv-top">
+                    <b>{c.name || c.wa_id}</b>
+                    <em>{fmtTime(c.created_at).split(',')[0]}</em>
+                  </span>
+                  <span className="wa-conv-snip">{c.direction === 'out' ? 'You: ' : ''}{c.text}</span>
                 </span>
-                <span className="wa-conv-snip">{c.direction === 'out' ? 'You: ' : ''}{c.text}</span>
-              </span>
-            </button>
-          ))}
+              </button>
+            ))}
+          </div>
         </aside>
 
         <div className="wa-thread">
@@ -1807,13 +2010,6 @@ function Settings() {
         )}
       </div>
 
-      {s && (
-        <div className="adm-block adm-settings">
-          <p>Hold window <b>{s.holdWindowMinutes} min</b> <span className="adm-dash">(set in server .env)</span></p>
-          <p>Razorpay mode <b>{s.razorpayMode}</b></p>
-          <p>WhatsApp (Whapi) <b>{s.whapiConnected ? 'connected' : 'manual-flag mode'}</b></p>
-        </div>
-      )}
     </section>
   )
 }
@@ -1837,6 +2033,7 @@ export default function Admin() {
   const [authed, setAuthed] = useState(false)
   const [role, setRoleState] = useState(getRole())
   const [tab, setTab] = useState('leads')
+  const [collapsed, setCollapsed] = useState(false) // icon-only sidebar
 
   // start tab on the right default for the role
   const enter = (r) => {
@@ -1858,11 +2055,14 @@ export default function Admin() {
   const nav = role === 'admin' ? ADMIN_NAV : STAFF_NAV
 
   return (
-    <div className="adm-shell">
-      <aside className="adm-side">
+    <div className={`adm-shell ${collapsed ? 'is-collapsed' : ''}`}>
+      <aside className="adm-side" style={collapsed ? { flexBasis: 70, width: 70, minWidth: 0 } : undefined}>
         <div className="adm-brand">
-          <img src="/favicon.png" alt="" />
-          <div>
+          <button type="button" className="adm-brand-logo" onClick={() => setCollapsed((c) => !c)}
+            title={collapsed ? 'Expand menu' : 'Collapse menu'} aria-label="Toggle menu">
+            <img src="/favicon.png" alt="" />
+          </button>
+          <div className="adm-brand-text">
             <strong>My Health School</strong>
             <span>{role === 'admin' ? 'Admin panel' : 'Staff'}</span>
           </div>
@@ -1870,15 +2070,16 @@ export default function Admin() {
 
         <nav className="adm-nav">
           {nav.map((n) => (
-            <button key={n.id} className={tab === n.id ? 'is-active' : ''} onClick={() => setTab(n.id)}>
+            <button key={n.id} className={tab === n.id ? 'is-active' : ''} onClick={() => setTab(n.id)}
+              title={n.label}>
               <NavIcon name={n.id} />
-              {n.label}
+              <span className="adm-nav-label">{n.label}</span>
             </button>
           ))}
         </nav>
 
         <button className="adm-signout" onClick={signOut}>
-          Sign out
+          <span className="adm-nav-label">Sign out</span>
         </button>
       </aside>
 

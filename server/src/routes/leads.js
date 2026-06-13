@@ -12,12 +12,15 @@ leadsRouter.post(
     const name = String(req.body?.name || '').trim()
     const phone = normalizePhone(req.body?.phone)
     if (!name || !phone) return res.status(400).json({ error: 'name and phone required' })
+    // 'meta' when the visitor arrived from a Meta/FB ad; else WhatsApp/organic.
+    const source = String(req.body?.source || '') === 'meta' ? 'meta' : null
 
     await query(
-      `INSERT INTO leads (phone, name)
-       VALUES ($1, $2)
-       ON CONFLICT (phone) DO UPDATE SET name = EXCLUDED.name, updated_at = now()`,
-      [phone, name],
+      `INSERT INTO leads (phone, name, source)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (phone) DO UPDATE SET name = EXCLUDED.name,
+              source = COALESCE(leads.source, EXCLUDED.source), updated_at = now()`,
+      [phone, name, source],
     )
     res.json({ ok: true, phone })
     syncLeadsToSheetSafe() // keep the linked Google Sheet live (fire-and-forget)

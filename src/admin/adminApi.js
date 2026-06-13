@@ -71,6 +71,8 @@ export const adminApi = {
   addTestimonial: (formData) => postForm('/testimonials', formData),
   deleteTestimonial: (id) => req(`/testimonials/${id}`, { method: 'DELETE' }),
   leads: () => req('/leads'),
+  deleteLeads: (phones) =>
+    req('/leads/delete', { method: 'POST', body: JSON.stringify({ phones }) }),
   slots: () => req('/slots'),
   settings: () => req('/settings'),
   openDate: (date, times) =>
