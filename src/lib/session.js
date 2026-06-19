@@ -1,6 +1,10 @@
 // The registered lead's identity persists in localStorage so a returning
-// visitor stays "enrolled" and the booking form can prefill.
-const KEY = 'vsl_lead'
+// visitor stays "enrolled" and the booking form can prefill. Namespaced per
+// funnel so a paid-funnel lead and a free-funnel lead don't clash in one
+// browser ('paid' keeps the original key for back-compat).
+import { getFunnel } from './funnel.js'
+
+const KEY = getFunnel() === 'free' ? 'vsl_lead_free' : 'vsl_lead'
 
 export function saveLead(lead) {
   try {

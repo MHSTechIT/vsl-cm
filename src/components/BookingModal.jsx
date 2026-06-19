@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
 import { getLead, saveLead } from '../lib/session.js'
+import { isFreeFunnel } from '../lib/funnel.js'
 import { trackAppointmentBooked, trackPurchase } from '../lib/tracking.js'
+
+const isFree = isFreeFunnel()
 
 function fmtDate(iso) {
   const d = new Date(iso + 'T00:00:00')
@@ -189,7 +192,7 @@ export default function BookingModal({ onClose }) {
     // Hosted-link mode: open a blank tab NOW (inside the click) so the browser
     // doesn't block it after our async calls; we point it at the link below.
     let payWin = null
-    if (paymentLink) payWin = window.open('', '_blank')
+    if (!isFree && paymentLink) payWin = window.open('', '_blank')
 
     setStatus('paying')
     try {
@@ -201,6 +204,14 @@ export default function BookingModal({ onClose }) {
       const hold = await api.holdSlot(saved, name.trim(), date, time)
       const slotId = hold.slotId
       startHoldCountdown(hold.holdExpiresAt)
+
+      // ── FREE funnel ───────────────────────────────────────────────────────
+      // No payment — confirm the held seat directly and show the success card.
+      if (isFree) {
+        const r = await api.freeConfirm(saved)
+        finish(r)
+        return
+      }
 
       // ── Hosted Razorpay page ──────────────────────────────────────────────
       // Seat is held + lead saved. Send the payer to the hosted page; the
@@ -281,8 +292,8 @@ export default function BookingModal({ onClose }) {
     doneRef.current = true
     clearInterval(holdTimer.current)
     clearInterval(pollTimer.current)
-    trackAppointmentBooked() // payment confirmed → success card appears
-    trackPurchase(50, 'INR')
+    trackAppointmentBooked() // booking confirmed → success card appears
+    if (!isFree) trackPurchase(50, 'INR') // free funnel has no purchase
     setConfirmed({ date: r.date, time: r.time })
     setStatus('done')
   }
@@ -295,10 +306,10 @@ export default function BookingModal({ onClose }) {
         {status === 'done' ? (
           <div className="booking-done">
             <div className="booking-tick" aria-hidden="true">✓</div>
-            <h3>Payment successful — slot confirmed</h3>
+            <h3>{isFree ? 'Slot confirmed' : 'Payment successful — slot confirmed'}</h3>
             <p>
-              Your health assessment is booked for <strong>{fmtDate(confirmed.date)}</strong> at{' '}
-              <strong>{confirmed.time}</strong>.
+              Your {isFree ? 'masterclass' : 'health assessment'} is booked for{' '}
+              <strong>{fmtDate(confirmed.date)}</strong> at <strong>{confirmed.time}</strong>.
             </p>
             <p className="caption">Our team will call you. A confirmation has been sent on WhatsApp.</p>
             <button className="cta" onClick={onClose}>Done</button>
@@ -318,7 +329,9 @@ export default function BookingModal({ onClose }) {
           </div>
         ) : (
           <>
-            <h3 className="modal-title">Book your ₹50 health assessment</h3>
+            <h3 className="modal-title">
+              {isFree ? 'Book your free masterclass slot' : 'Book your ₹50 health assessment'}
+            </h3>
 
             <input
               className="reg-input"
@@ -399,7 +412,7 @@ export default function BookingModal({ onClose }) {
                 onClick={confirmAndPay}
                 disabled={!time || status === 'paying'}
               >
-                {status === 'paying' ? 'Processing…' : 'Book My Appointment'}
+                {status === 'paying' ? 'Processing…' : isFree ? 'Book My Free Slot' : 'Book My Appointment'}
               </button>
             )}
           </>

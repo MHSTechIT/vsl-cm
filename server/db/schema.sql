@@ -54,6 +54,16 @@ CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT
 );
+-- Per-funnel settings: the same key can hold a different value per funnel, so
+-- 'paid' and 'free' each have their own video/thumbnail/reveal/etc. Existing
+-- rows become 'paid'. PK becomes (key, funnel).
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS funnel TEXT NOT NULL DEFAULT 'paid';
+ALTER TABLE settings DROP CONSTRAINT IF EXISTS settings_pkey;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'settings_key_funnel_pk') THEN
+    ALTER TABLE settings ADD CONSTRAINT settings_key_funnel_pk PRIMARY KEY (key, funnel);
+  END IF;
+END $$;
 
 -- Binary media (video, thumbnail, report images) stored IN the database
 CREATE TABLE IF NOT EXISTS media (
@@ -88,6 +98,8 @@ ALTER TABLE leads ADD COLUMN IF NOT EXISTS wa_payment TEXT;           -- payment
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS wa_1h_sent BOOLEAN NOT NULL DEFAULT false; -- 1-hour-before reminder fired
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS hc_status TEXT;            -- health-check status ('done' once the HC form is filled)
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS hc_data JSONB;             -- health-check form (sugar/age/gender/detox/etc.)
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS converted BOOLEAN NOT NULL DEFAULT false; -- admin-toggled: lead is converted (enrolled/closed)
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_alert_sent BOOLEAN NOT NULL DEFAULT false; -- internal 'lead finished video' alert fired (once)
 
 -- WATI WhatsApp inbox — every inbound/outbound message, for the chat page.
 CREATE TABLE IF NOT EXISTS wa_messages (
@@ -117,6 +129,17 @@ ALTER TABLE slots ADD COLUMN IF NOT EXISTS manual BOOLEAN NOT NULL DEFAULT false
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS source TEXT; -- 'meta' (came from a Meta/FB ad) | null/other = WhatsApp/organic
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS source_detail TEXT; -- which Meta ad/campaign (from the ad URL's utm_campaign / utm_content params)
 
+-- ============================================================
+-- Multi-funnel: 'paid' (the original ₹ VSL) and 'free' (no-payment masterclass
+-- copy). Every lead/slot/setting/testimonial is tagged so the two funnels share
+-- code but never share data. Existing rows default to 'paid'.
+-- ============================================================
+ALTER TABLE leads        ADD COLUMN IF NOT EXISTS funnel TEXT NOT NULL DEFAULT 'paid';
+ALTER TABLE slots        ADD COLUMN IF NOT EXISTS funnel TEXT NOT NULL DEFAULT 'paid';
+ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS funnel TEXT NOT NULL DEFAULT 'paid';
+CREATE INDEX IF NOT EXISTS idx_leads_funnel ON leads (funnel);
+CREATE INDEX IF NOT EXISTS idx_slots_funnel ON slots (funnel);
+
 -- WATI inbox read-state: when the admin last opened each conversation. Inbound
 -- messages newer than this count as unread (shown as a badge in the chat list).
 CREATE TABLE IF NOT EXISTS wa_reads (
@@ -130,6 +153,14 @@ CREATE TABLE IF NOT EXISTS slot_days (
   slot_date  DATE PRIMARY KEY,
   active     BOOLEAN NOT NULL DEFAULT true
 );
+-- Per-funnel publish toggle: each funnel can show/hide a date independently.
+ALTER TABLE slot_days ADD COLUMN IF NOT EXISTS funnel TEXT NOT NULL DEFAULT 'paid';
+ALTER TABLE slot_days DROP CONSTRAINT IF EXISTS slot_days_pkey;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'slot_days_date_funnel_pk') THEN
+    ALTER TABLE slot_days ADD CONSTRAINT slot_days_date_funnel_pk PRIMARY KEY (slot_date, funnel);
+  END IF;
+END $$;
 
 -- Idempotency log — Razorpay retries webhooks; the unique (source,event_id)
 -- gate stops the same event from being processed twice.

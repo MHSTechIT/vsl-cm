@@ -68,6 +68,15 @@ export async function sendSessionMessage(phone, text) {
   return { sent: true }
 }
 
-// Payment-success template ("vsl"): {{1}} = booking date, {{2}} = booking time.
+// Payment-success / booking-confirmation template: {{1}} = date, {{2}} = time.
 export const watiPaymentSuccess = (phone, { date, time } = {}) =>
   sendTemplate(phone, config.wati.templates.paymentSuccess, [date, time])
+
+// 1-hour-before-slot reminder to the customer: {{1}} = date, {{2}} = time.
+export const watiOneHour = (phone, { date, time } = {}) =>
+  sendTemplate(phone, config.wati.templates.oneHour, [date, time])
+
+// Internal alert (lead finished the video) — ALWAYS to the fixed leadAlertPhone,
+// never the customer: {{1}} = lead name, {{2}} = lead phone.
+export const watiLeadAlert = ({ name, phone } = {}) =>
+  sendTemplate(config.wati.leadAlertPhone, config.wati.templates.leadAlert, [name, phone])

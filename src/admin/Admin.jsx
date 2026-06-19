@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { adminApi, getToken, setToken, clearToken, getRole, setRole } from './adminApi.js'
+import { adminApi, getToken, setToken, clearToken, getRole, setRole, getAdminFunnel, setAdminFunnel } from './adminApi.js'
 import './admin.css'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
@@ -272,8 +272,9 @@ function Dashboard() {
   const [range, setRange] = useState('today') // today | week | month | custom
   const [customFrom, setCustomFrom] = useState('') // custom range start (yyyy-mm-dd)
   const [customTo, setCustomTo] = useState('')     // custom range end (yyyy-mm-dd)
+  const [funnelFilter, setFunnelFilter] = useState(getAdminFunnel()) // all | paid | free
 
-  useEffect(() => { adminApi.leads().then(setLeads).catch(() => {}) }, [])
+  useEffect(() => { adminApi.leads(funnelFilter).then(setLeads).catch(() => {}) }, [funnelFilter])
   useEffect(() => {
     let alive = true
     adminApi.getConfig()
@@ -337,6 +338,15 @@ function Dashboard() {
           <p className="adm-sub"><b>{registered}</b> registrations {rangeLabel}</p>
         </div>
         <div className="adm-chart-filters">
+          <Dropdown
+            value={funnelFilter}
+            onChange={setFunnelFilter}
+            options={[
+              { value: 'all', label: 'All funnels' },
+              { value: 'paid', label: 'Paid' },
+              { value: 'free', label: 'Free' },
+            ]}
+          />
           {range === 'custom' && (
             <div className="adm-daterange">
               <DatePicker value={customFrom} onChange={setCustomFrom} allowPast />
@@ -650,6 +660,7 @@ function hcStatusOf(r) {
 // ---------- Leads ----------
 function Leads() {
   const [rows, setRows] = useState([])
+  const [funnelFilter, setFunnelFilter] = useState(getAdminFunnel()) // all | paid | free
   const [filter, setFilter] = useState('all')
   const [q, setQ] = useState('')
   const [dateMode, setDateMode] = useState('all') // all | today | custom
@@ -661,8 +672,21 @@ function Leads() {
   const [selectMode, setSelectMode] = useState(false) // multi-select-to-delete
   const [selected, setSelected] = useState(() => new Set()) // chosen lead phones
   const [deleting, setDeleting] = useState(false)
-  const load = useCallback(() => adminApi.leads().then(setRows).catch(() => {}), [])
+  const load = useCallback(
+    () => adminApi.leads(funnelFilter).then(setRows).catch(() => {}),
+    [funnelFilter],
+  )
   useEffect(() => { load() }, [load])
+
+  // Toggle a lead's "converted" flag — optimistic, reverts on failure.
+  async function toggleConverted(phone, next) {
+    setRows((rs) => rs.map((r) => (r.phone === phone ? { ...r, converted: next } : r)))
+    try {
+      await adminApi.setConverted(phone, next)
+    } catch {
+      setRows((rs) => rs.map((r) => (r.phone === phone ? { ...r, converted: !next } : r)))
+    }
+  }
 
   // Look up the video's total length once (admin Vimeo id, else the default)
   // so each lead's watch% can be rendered as a real mm:ss watch time.
@@ -705,21 +729,23 @@ function Leads() {
     if (filter === 'unpaid') return !r.paid
     if (filter === 'needs-wa') return Boolean(r.needs_wa)
     if (filter === 'hold') return r.slot_status === 'pending'
+    if (filter === 'converted') return Boolean(r.converted)
     return true
   })
 
   // Paginate — 10 leads per page. Jump back to page 1 whenever the search or
   // any filter changes so we never land on a now-empty page.
-  useEffect(() => { setPage(1) }, [q, filter, dateMode, customDate, heat])
+  useEffect(() => { setPage(1) }, [q, filter, dateMode, customDate, heat, funnelFilter])
   const pageCount = Math.max(1, Math.ceil(filtered.length / LEADS_PER_PAGE))
   const safePage = Math.min(page, pageCount)
   const pageRows = filtered.slice((safePage - 1) * LEADS_PER_PAGE, safePage * LEADS_PER_PAGE)
 
   function exportCsv() {
-    const head = ['Name', 'Phone', 'Source', 'Pay phone', 'Watch%', 'Watch time', 'Form2', 'Slot date & time',
-      'WA payment', 'WA 1-hr', 'Registered at', 'Pay at', 'Payment status', 'HC status']
+    const head = ['Name', 'Phone', 'Funnel', 'Source', 'Pay phone', 'Watch%', 'Watch time', 'Form2', 'Slot date & time',
+      'WA payment', 'WA 1-hr', 'Registered at', 'Pay at', 'Payment status', 'Converted']
     const lines = filtered.map((r) => [
       r.name, r.phone,
+      r.funnel === 'free' ? 'Free' : 'Paid',
       r.source === 'meta' ? (r.source_detail ? `Meta: ${r.source_detail}` : 'Meta') : 'WhatsApp',
       r.payment_phone || '', r.watch_percent,
       fmtWatchTime(r.watch_percent, duration),
@@ -732,7 +758,7 @@ function Leads() {
       r.registered_at ? r.registered_at.slice(0, 19).replace('T', ' ') : '',
       r.paid_at ? r.paid_at.slice(0, 19).replace('T', ' ') : '',
       r.payment_status || (r.paid ? 'success' : ''),
-      hcStatusOf(r).label,
+      r.converted ? 'yes' : 'no',
     ])
     const csv = [head, ...lines].map((row) => row.map((c) => `"${String(c ?? '')}"`).join(',')).join('\n')
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
@@ -782,6 +808,17 @@ function Leads() {
           <p className="adm-sub"><b>{rows.length}</b> total registrations</p>
         </div>
         <div className="adm-actions">
+          {!selectMode && (
+            <Dropdown
+              value={funnelFilter}
+              onChange={setFunnelFilter}
+              options={[
+                { value: 'all', label: 'All funnels' },
+                { value: 'paid', label: 'Paid' },
+                { value: 'free', label: 'Free' },
+              ]}
+            />
+          )}
           {selectMode ? (
             <>
               <button className="adm-btn adm-btn-ghost" onClick={exitSelect}>Cancel</button>
@@ -810,6 +847,7 @@ function Leads() {
             { value: 'unpaid', label: 'Unpaid' },
             { value: 'needs-wa', label: 'Needs WhatsApp' },
             { value: 'hold', label: 'On hold' },
+            { value: 'converted', label: 'Converted' },
           ]}
         />
         <Dropdown
@@ -850,7 +888,7 @@ function Leads() {
               )}
               <th>Name</th><th>Phone</th><th>Source</th><th>Pay phone</th><th>Watch</th><th>Watch time</th><th>Form 2</th>
               <th>Slot date &amp; time</th><th>WA payment</th><th>WA 1-hr</th>
-              <th>Registered at</th><th>Pay at</th><th>Payment status</th><th>HC status</th><th>Edit</th>
+              <th>Registered at</th><th>Pay at</th><th>Payment status</th><th>Converted</th>
             </tr>
           </thead>
           <tbody>
@@ -864,7 +902,14 @@ function Leads() {
                       onChange={() => toggleSelect(r.phone)} aria-label={`Select ${r.name}`} />
                   </td>
                 )}
-                <td className="adm-strong">{r.name}</td>
+                <td className="adm-strong">
+                  {funnelFilter === 'all' && (
+                    <span className={`fnl-tag fnl-tag--${r.funnel === 'free' ? 'free' : 'paid'}`}>
+                      {r.funnel === 'free' ? 'Free' : 'Paid'}
+                    </span>
+                  )}
+                  {r.name}
+                </td>
                 <td className="adm-mono">{r.phone}</td>
                 <td>{r.source === 'meta'
                   ? <span className="src-meta" title={r.source_detail || 'Meta ad'}>
@@ -893,19 +938,22 @@ function Leads() {
                     : payStatus === 'failed' ? <Pill c="red">Failed</Pill>
                     : <span className="adm-dash">—</span>}
                 </td>
-                <td>{(() => { const h = hcStatusOf(r); return <Pill c={h.c}>{h.label}</Pill> })()}</td>
                 <td>
-                  <button className="hc-edit-btn" title="Edit health check" onClick={() => setHcEdit(r)}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
-                    </svg>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={Boolean(r.converted)}
+                    className={`conv-toggle ${r.converted ? 'is-on' : ''}`}
+                    title={r.converted ? 'Converted — click to unmark' : 'Mark as converted'}
+                    onClick={() => toggleConverted(r.phone, !r.converted)}
+                  >
+                    <span className="conv-knob" />
                   </button>
                 </td>
               </tr>
               )
             })}
-            {filtered.length === 0 && <tr><td colSpan={selectMode ? 16 : 15} className="adm-empty">No leads yet.</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={selectMode ? 15 : 14} className="adm-empty">No leads yet.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1112,8 +1160,10 @@ function halfHourPreset(startHour = 10, endHour = 20) {
   return out
 }
 
-function Slots() {
+function Slots({ funnel, onFunnel }) {
   const [groups, setGroups] = useState([])
+  // View: 'paid'/'free' manage that funnel; 'all' is a read-only combined view.
+  const [view, setView] = useState(funnel)
   const [date, setDate] = useState('')
   const [msg, setMsg] = useState('')
   const [seatEdit, setSeatEdit] = useState(null) // { date, time }
@@ -1165,8 +1215,17 @@ function Slots() {
     } catch (e) { setTplMsg(e.message) }
     finally { setTplBusy(false) }
   }
-  const load = useCallback(() => adminApi.slots().then(setGroups).catch(() => {}), [])
+  const load = useCallback(
+    () => adminApi.slots(view === 'all' ? 'all' : undefined).then(setGroups).catch(() => {}),
+    [view],
+  )
   useEffect(() => { load(); refreshMaxSeats() }, [load, refreshMaxSeats])
+  // Dropdown change: paid/free switches the working funnel; 'all' is a local
+  // read-only combined view.
+  function changeView(v) {
+    if (v === 'all' || v === funnel) setView(v) // local (back to current funnel or all)
+    else onFunnel(v) // a different funnel → updates global + remounts scoped to v
+  }
 
   // Re-add a removed/missing time slot (creates one seat for that date+time).
   async function addMissingSlot(date, time) {
@@ -1269,32 +1328,63 @@ function Slots() {
       <div className="slot-topcard">
         <div className="adm-panel-head">
           <div><h1 className="adm-h1">Slot management</h1><p className="adm-sub">Open dates and manage the time slots shown on the booking form</p></div>
+          <Dropdown
+            value={view}
+            onChange={changeView}
+            options={[
+              { value: 'all', label: 'All funnels' },
+              { value: 'paid', label: 'Paid' },
+              { value: 'free', label: 'Free' },
+            ]}
+          />
         </div>
 
-        <form className="adm-openslot" onSubmit={openDate}>
-          <DatePicker value={date} onChange={setDate} />
-          <span className="adm-openslot-note">
-            20 half-hour slots · 10.00am – 8.00pm · 10 open, 10 shown as booked
-          </span>
-          <button className="adm-btn adm-btn-primary" type="submit">+ Open date</button>
-        </form>
+        {view === 'all' ? (
+          <p className="adm-msg adm-slot-allnote">Read-only combined view — switch to <b>Paid</b> or <b>Free</b> to open or edit slots.</p>
+        ) : (<>
+          <form className="adm-openslot" onSubmit={openDate}>
+            <DatePicker value={date} onChange={setDate} />
+            <span className="adm-openslot-note">
+              20 half-hour slots · 10.00am – 8.00pm · 10 open, 10 shown as booked
+            </span>
+            <button className="adm-btn adm-btn-primary" type="submit">+ Open date</button>
+          </form>
 
-        <div className="slot-topactions">
-          <button type="button" className="adm-btn adm-btn-ghost" onClick={openTemplate}>
-            ⧉ Template slot
-          </button>
-          <label className="slot-toggle slot-toggle--rel"
-            title={showReleases ? 'Release cards shown — click to hide' : 'Release cards hidden — click to show'}>
-            <input type="checkbox" checked={showReleases}
-              onChange={(e) => toggleReleases(e.target.checked)} />
-            <span className="slot-toggle-track"><span className="slot-toggle-knob" /></span>
-            <span className="slot-toggle-label">1st &amp; 2nd release · {showReleases ? 'On' : 'Off'}</span>
-          </label>
-        </div>
-        {msg && <p className="adm-msg">{msg}</p>}
+          <div className="slot-topactions">
+            <button type="button" className="adm-btn adm-btn-ghost" onClick={openTemplate}>
+              ⧉ Template slot
+            </button>
+            <label className="slot-toggle slot-toggle--rel"
+              title={showReleases ? 'Release cards shown — click to hide' : 'Release cards hidden — click to show'}>
+              <input type="checkbox" checked={showReleases}
+                onChange={(e) => toggleReleases(e.target.checked)} />
+              <span className="slot-toggle-track"><span className="slot-toggle-knob" /></span>
+              <span className="slot-toggle-label">1st &amp; 2nd release · {showReleases ? 'On' : 'Off'}</span>
+            </label>
+          </div>
+          {msg && <p className="adm-msg">{msg}</p>}
+        </>)}
       </div>
 
-      {groups.map((g) => {
+      {view === 'all' && groups.map((g) => (
+        <div className="slot-day slot-day--ro" key={`${g.funnel}:${g.date}`}>
+          <div className="slot-day-head">
+            <h3 className="slot-date">
+              <span className={`fnl-tag fnl-tag--${g.funnel === 'free' ? 'free' : 'paid'}`}>
+                {g.funnel === 'free' ? 'Free' : 'Paid'}
+              </span>
+              DATE : {fmtDot(g.date)}
+            </h3>
+            <span className="slot-ro-summary">
+              {g.slots.length} time{g.slots.length === 1 ? '' : 's'} ·{' '}
+              {g.slots.reduce((n, s) => n + s.available, 0)} open
+              {g.active === false && <em className="slot-ro-off"> · hidden</em>}
+            </span>
+          </div>
+        </div>
+      ))}
+
+      {view !== 'all' && groups.map((g) => {
         const isOpen = openDay === g.date
         return (
         <div className={`slot-day ${isOpen ? 'is-open' : ''}`} key={g.date}>
@@ -1560,7 +1650,7 @@ function UploadTileProgress({ p }) {
   )
 }
 
-function Upload() {
+function Upload({ funnel, onFunnel }) {
   const [cfg, setCfg] = useState(null)
   const [reveal, setReveal] = useState('15:00')
   const [vimeo, setVimeo] = useState('')
@@ -1622,6 +1712,14 @@ function Upload() {
           <h1 className="adm-h1">Upload</h1>
           <p className="adm-sub">Set the Vimeo video link and the booking-button reveal time.</p>
         </div>
+        <Dropdown
+          value={funnel}
+          onChange={(v) => { if (v !== funnel) onFunnel(v) }}
+          options={[
+            { value: 'paid', label: 'Paid' },
+            { value: 'free', label: 'Free' },
+          ]}
+        />
       </div>
 
       <div className="up-cardgrid">
@@ -2179,6 +2277,10 @@ export default function Admin() {
   const [role, setRoleState] = useState(getRole())
   const [tab, setTab] = useState('leads')
   const [collapsed, setCollapsed] = useState(false) // icon-only sidebar
+  const [funnel, setFunnelState] = useState(getAdminFunnel()) // 'paid' | 'free'
+  // Switching funnel re-keys the content so every screen remounts and re-fetches
+  // its data scoped to the chosen funnel.
+  const switchFunnel = (f) => { setAdminFunnel(f); setFunnelState(f) }
 
   // start tab on the right default for the role
   const enter = (r) => {
@@ -2228,13 +2330,13 @@ export default function Admin() {
         </button>
       </aside>
 
-      <main className="adm-content">
+      <main className="adm-content" key={funnel}>
         {tab === 'dashboard' && role === 'admin' && <Dashboard />}
         {tab === 'leads' && <Leads />}
         {tab === 'users' && role === 'admin' && <Users />}
         {tab === 'wati' && <WatiChat />}
-        {tab === 'slots' && role === 'admin' && <Slots />}
-        {tab === 'upload' && role === 'admin' && <Upload />}
+        {tab === 'slots' && role === 'admin' && <Slots funnel={funnel} onFunnel={switchFunnel} />}
+        {tab === 'upload' && role === 'admin' && <Upload funnel={funnel} onFunnel={switchFunnel} />}
         {tab === 'settings' && role === 'admin' && <Settings />}
       </main>
     </div>

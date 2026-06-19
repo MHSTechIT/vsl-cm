@@ -1,6 +1,7 @@
 const BASE = import.meta.env.VITE_API_URL || ''
 const TOKEN_KEY = 'vsl_admin_token'
 const ROLE_KEY = 'vsl_admin_role'
+const FUNNEL_KEY = 'vsl_admin_funnel'
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY) || ''
 export const setToken = (t) => localStorage.setItem(TOKEN_KEY, t)
@@ -8,8 +9,17 @@ export const getRole = () => localStorage.getItem(ROLE_KEY) || ''
 export const setRole = (r) => localStorage.setItem(ROLE_KEY, r)
 export const clearToken = () => { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(ROLE_KEY) }
 
+// Which funnel the admin is viewing ('paid' | 'free'). Appended to every
+// request so leads/slots/content/testimonials/stats are scoped to it.
+export const getAdminFunnel = () => localStorage.getItem(FUNNEL_KEY) || 'paid'
+export const setAdminFunnel = (f) => localStorage.setItem(FUNNEL_KEY, f === 'free' ? 'free' : 'paid')
+// Append the current funnel — unless the path already specifies one (so an
+// explicit override like ?funnel=all wins).
+const withFunnel = (path) =>
+  /[?&]funnel=/.test(path) ? path : `${path}${path.includes('?') ? '&' : '?'}funnel=${getAdminFunnel()}`
+
 async function req(path, options = {}) {
-  const res = await fetch(`${BASE}/api/admin${path}`, {
+  const res = await fetch(`${BASE}/api/admin${withFunnel(path)}`, {
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${getToken()}`,
@@ -28,7 +38,7 @@ async function req(path, options = {}) {
 
 // multipart POST (file uploads) — no JSON content-type, browser sets boundary
 async function postForm(path, formData) {
-  const res = await fetch(`${BASE}/api/admin${path}`, {
+  const res = await fetch(`${BASE}/api/admin${withFunnel(path)}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getToken()}` },
     body: formData,
@@ -41,7 +51,7 @@ async function postForm(path, formData) {
 function postFormProgress(path, formData, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', `${BASE}/api/admin${path}`)
+    xhr.open('POST', `${BASE}/api/admin${withFunnel(path)}`)
     xhr.setRequestHeader('Authorization', `Bearer ${getToken()}`)
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100))
@@ -70,10 +80,10 @@ export const adminApi = {
   listTestimonials: () => req('/testimonials'),
   addTestimonial: (formData) => postForm('/testimonials', formData),
   deleteTestimonial: (id) => req(`/testimonials/${id}`, { method: 'DELETE' }),
-  leads: () => req('/leads'),
+  leads: (funnel) => req(funnel ? `/leads?funnel=${encodeURIComponent(funnel)}` : '/leads'),
   deleteLeads: (phones) =>
     req('/leads/delete', { method: 'POST', body: JSON.stringify({ phones }) }),
-  slots: () => req('/slots'),
+  slots: (funnel) => req(funnel ? `/slots?funnel=${encodeURIComponent(funnel)}` : '/slots'),
   settings: () => req('/settings'),
   openDate: (date, times) =>
     req('/slots', { method: 'POST', body: JSON.stringify({ date, times }) }),
@@ -102,6 +112,8 @@ export const adminApi = {
   removeTime: (date, time) =>
     req('/slots/remove', { method: 'POST', body: JSON.stringify({ date, time }) }),
   waSent: (phone) => req(`/leads/${encodeURIComponent(phone)}/wa-sent`, { method: 'POST' }),
+  setConverted: (phone, converted) =>
+    req(`/leads/${encodeURIComponent(phone)}/converted`, { method: 'POST', body: JSON.stringify({ converted }) }),
   users: () => req('/users'),
   createUser: (name, phone, password) =>
     req('/users', { method: 'POST', body: JSON.stringify({ name, phone, password }) }),

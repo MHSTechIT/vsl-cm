@@ -7,8 +7,10 @@ import { paymentRouter, razorpayWebhook } from './routes/payment.js'
 import { adminRouter, staffLogin } from './routes/admin.js'
 import { watiWebhook } from './routes/watiWebhook.js'
 import { startHoldSweeper } from './lib/holds.js'
+import { startOneHourReminder } from './lib/reminders.js'
 import { ah } from './lib/ah.js'
 import { getSettings } from './lib/settings.js'
+import { parseFunnel } from './lib/funnel.js'
 import { query } from './db.js'
 
 const app = express()
@@ -64,26 +66,32 @@ app.get(
   }),
 )
 
-// public landing-page config (video, poster, booking-reveal time)
+// public landing-page config (video, poster, booking-reveal time) — per funnel
 app.get(
   '/api/config',
-  ah(async (_req, res) => {
-    const s = await getSettings(['video_id', 'thumb_id', 'reveal_seconds', 'vimeo_id'])
+  ah(async (req, res) => {
+    const funnel = parseFunnel(req.query.funnel)
+    const s = await getSettings(['video_id', 'thumb_id', 'reveal_seconds', 'vimeo_id'], funnel)
     res.json({
       vimeoId: s.vimeo_id || null,
       videoUrl: s.video_id ? `/media/${s.video_id}` : null,
       thumbUrl: s.thumb_id ? `/media/${s.thumb_id}` : null,
       revealSeconds: s.reveal_seconds != null ? Number(s.reveal_seconds) : 900,
-      paymentLink: config.razorpay.paymentLink || null,
+      // free funnel has no payment
+      paymentLink: funnel === 'free' ? null : config.razorpay.paymentLink || null,
     })
   }),
 )
 
-// public testimonials (proof cards) for the landing page
+// public testimonials (proof cards) for the landing page — per funnel
 app.get(
   '/api/testimonials',
-  ah(async (_req, res) => {
-    const { rows } = await query(`SELECT * FROM testimonials ORDER BY sort_order, id`)
+  ah(async (req, res) => {
+    const funnel = parseFunnel(req.query.funnel)
+    const { rows } = await query(
+      `SELECT * FROM testimonials WHERE funnel = $1 ORDER BY sort_order, id`,
+      [funnel],
+    )
     res.json(
       rows.map((r) => ({
         id: r.id,
@@ -120,9 +128,17 @@ process.on('unhandledRejection', (e) =>
   console.error('[api] unhandledRejection:', e?.message || e),
 )
 
+// Keep the server alive through unexpected errors (e.g. a DB link dropping in a
+// background timer). Log loudly rather than letting the process exit — in dev,
+// node --watch otherwise leaves it down until a file changes; in prod it'd 502.
+process.on('uncaughtException', (e) =>
+  // eslint-disable-next-line no-console
+  console.error('[api] uncaughtException (kept alive):', e?.message || e),
+)
+
 app.listen(config.port, () => {
   // eslint-disable-next-line no-console
   console.log(`✓ API on http://localhost:${config.port}  (razorpay: ${config.razorpay.mode})`)
   startHoldSweeper()
-  // 1-hour reminder disabled — only the payment-success template is sent.
+  startOneHourReminder() // sends one_hour_togo ~1h before each paid booking
 })

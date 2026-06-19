@@ -1,7 +1,9 @@
 import { Router } from 'express'
 import { query } from '../db.js'
 import { ah } from '../lib/ah.js'
+import { parseFunnel } from '../lib/funnel.js'
 import { syncLeadsToSheetSafe } from '../lib/google-sheets.js'
+import { watiConfigured, watiLeadAlert } from '../lib/wati.js'
 
 export const leadsRouter = Router()
 
@@ -17,15 +19,18 @@ leadsRouter.post(
     // Which Meta ad/campaign they came from (only meaningful for meta leads).
     const sourceDetail =
       source === 'meta' ? String(req.body?.sourceDetail || '').trim().slice(0, 200) || null : null
+    // Which funnel this registration belongs to ('paid' | 'free').
+    const funnel = parseFunnel(req.body?.funnel)
 
     await query(
-      `INSERT INTO leads (phone, name, source, source_detail)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO leads (phone, name, source, source_detail, funnel)
+       VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (phone) DO UPDATE SET name = EXCLUDED.name,
               source = COALESCE(leads.source, EXCLUDED.source),
               source_detail = COALESCE(leads.source_detail, EXCLUDED.source_detail),
+              funnel = EXCLUDED.funnel,
               updated_at = now()`,
-      [phone, name, source, sourceDetail],
+      [phone, name, source, sourceDetail, funnel],
     )
     res.json({ ok: true, phone })
     syncLeadsToSheetSafe() // keep the linked Google Sheet live (fire-and-forget)
@@ -61,6 +66,24 @@ leadsRouter.post(
         WHERE phone = $1`,
       [phone, percent],
     )
+
+    // Lead finished the video (100%) → fire the internal lead_alert exactly once.
+    // The guarded UPDATE (lead_alert_sent = false) makes repeat/retry pings no-ops.
+    if (percent >= 100 || checkpoint === 'finished') {
+      const { rows } = await query(
+        `UPDATE leads SET lead_alert_sent = true
+           WHERE phone = $1 AND watch_percent >= 100 AND lead_alert_sent = false
+           RETURNING name, phone`,
+        [phone],
+      )
+      if (rows.length && watiConfigured()) {
+        watiLeadAlert(rows[0]).catch((e) =>
+          // eslint-disable-next-line no-console
+          console.error('[wati] lead_alert failed:', e.message),
+        )
+      }
+    }
+
     res.json({ ok: true })
   }),
 )

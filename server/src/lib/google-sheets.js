@@ -1,16 +1,17 @@
+import crypto from 'node:crypto'
 import { config } from '../config.js'
 import { query } from '../db.js'
 import { getSettings, setSetting } from './settings.js'
 
 // ============================================================
 // Google Sheets export — mirrors the Leads registry into a sheet.
-// OAuth refresh-token flow (no per-request login). Plain REST via fetch,
-// so no extra npm dependency.
+// Service-account JWT flow (no per-request login, no expiring refresh token).
+// Plain REST via fetch, so no extra npm dependency.
 // ============================================================
 
 export function isConfigured() {
   const g = config.google
-  return Boolean(g.clientId && g.clientSecret && g.refreshToken)
+  return Boolean(g.serviceAccountEmail && g.serviceAccountKey)
 }
 
 // Pull the spreadsheet id out of a full URL (or accept a bare id).
@@ -21,57 +22,55 @@ export function spreadsheetIdFromUrl(url) {
   return /^[a-zA-Z0-9-_]{20,}$/.test(s) ? s : null
 }
 
-// Exchange the long-lived refresh token for a short-lived access token.
+const b64url = (input) =>
+  Buffer.from(input).toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
+
+// Mint a short-lived access token by signing a JWT with the service-account
+// private key (RS256) and exchanging it at Google's token endpoint.
 async function accessToken() {
-  const { clientId, clientSecret, refreshToken } = config.google
-  if (!clientId || !clientSecret || !refreshToken) {
-    throw new Error('Google OAuth is not configured on the server')
+  const { serviceAccountEmail, serviceAccountKey } = config.google
+  if (!serviceAccountEmail || !serviceAccountKey) {
+    throw new Error('Google service account is not configured on the server')
   }
+  const now = Math.floor(Date.now() / 1000)
+  const header = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))
+  const claim = b64url(JSON.stringify({
+    iss: serviceAccountEmail,
+    scope: 'https://www.googleapis.com/auth/spreadsheets',
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 3600,
+  }))
+  const unsigned = `${header}.${claim}`
+  let signature
+  try {
+    signature = crypto.createSign('RSA-SHA256').update(unsigned).sign(serviceAccountKey)
+  } catch (e) {
+    throw new Error(`Google auth failed — bad service-account private key (${e.message})`)
+  }
+  const jwt = `${unsigned}.${b64url(signature)}`
+
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken,
-      grant_type: 'refresh_token',
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: jwt,
     }),
   })
   const j = await res.json().catch(() => ({}))
   if (!res.ok || !j.access_token) {
     const detail = j.error_description || j.error || `${res.status}`
-    throw new Error(`Google auth failed (${detail}) — the refresh token may be expired; regenerate it`)
+    throw new Error(`Google auth failed (${detail}) — check the service account key and that the Sheets API is enabled`)
   }
   return j.access_token
 }
 
 const HEADER = [
   'Name', 'Phone', 'Pay phone', 'Watch %', 'Form 2', 'Slot date & time',
-  'WA payment', 'WA 1-hr', 'Registered at (paid)', 'Payment status', 'HC status',
+  'WA payment', 'WA 1-hr', 'Registered at (paid)', 'Payment status', 'Converted',
 ]
 const ts = (v) => (v ? String(v).slice(0, 19).replace('T', ' ') : '')
-
-// Same HC-status logic as the admin Leads table (keep the two in sync).
-const HC_FIELDS = ['sugar_level', 'age', 'gender', 'l1_detox', 'professional', 'location', 'other_issues']
-function hcLabel(l) {
-  const hc = l.hc_data || null
-  const filled = hc ? HC_FIELDS.filter((k) => String(hc[k] || '').trim()).length : 0
-  if (filled === HC_FIELDS.length) return 'Completed'
-  if (l.slot_date && l.slot_time) {
-    const end = String(l.slot_time).split('-')[1]?.trim()
-    const m = end?.match(/(\d{1,2})\.(\d{2})\s*(am|pm)/i)
-    if (m) {
-      let h = Number(m[1])
-      const min = Number(m[2])
-      const pm = /pm/i.test(m[3])
-      if (pm && h !== 12) h += 12
-      if (!pm && h === 12) h = 0
-      const t = Date.parse(`${String(l.slot_date).slice(0, 10)}T${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}:00+05:30`)
-      if (!Number.isNaN(t) && Date.now() > t) return 'Overdue'
-    }
-  }
-  return filled > 0 ? 'Pending' : 'Not yet started'
-}
 
 function rowFor(l) {
   return [
@@ -85,7 +84,7 @@ function rowFor(l) {
     l.wa_1h_sent ? 'yes' : 'no',
     ts(l.paid_at),
     l.payment_status || (l.paid ? 'success' : ''),
-    hcLabel(l),
+    l.converted ? 'yes' : 'no',
   ]
 }
 
@@ -111,7 +110,7 @@ export async function syncLeadsToSheet() {
   const token = await accessToken()
   const { rows } = await query(
     `SELECT phone, name, watch_percent, form2_submitted, slot_date, slot_time,
-            paid, paid_at, payment_phone, payment_status, wa_payment, wa_1h_sent, hc_status, hc_data
+            paid, paid_at, payment_phone, payment_status, wa_payment, wa_1h_sent, converted
        FROM leads ORDER BY registered_at DESC`,
   )
   const values = [HEADER, ...rows.map(rowFor)]

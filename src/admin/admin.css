@@ -698,6 +698,23 @@
 }
 .hc-edit-btn svg { width: 15px; height: 15px; }
 .hc-edit-btn:hover { background: var(--crm-primary); color: #fff; }
+
+/* ---- converted toggle ---- */
+.conv-toggle {
+  --w: 42px; --h: 24px; --pad: 3px;
+  width: var(--w); height: var(--h); padding: 0; border: none; cursor: pointer;
+  border-radius: 999px; background: #cbd0db; position: relative;
+  transition: background 0.18s ease; flex: none;
+}
+.conv-toggle.is-on { background: var(--crm-green); }
+.conv-knob {
+  position: absolute; top: var(--pad); left: var(--pad);
+  width: calc(var(--h) - var(--pad) * 2); height: calc(var(--h) - var(--pad) * 2);
+  border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.18s ease;
+}
+.conv-toggle.is-on .conv-knob { transform: translateX(calc(var(--w) - var(--h))); }
+.conv-toggle:focus-visible { outline: 2px solid var(--crm-primary); outline-offset: 2px; }
 @media (max-width: 600px) { .hc-form { grid-template-columns: 1fr; } }
 
 /* ---------- table ---------- */
@@ -714,6 +731,13 @@
 .leads-panel .adm-table thead th { position: sticky; top: 0; z-index: 2; }
 @media (max-width: 760px) { .leads-panel { max-height: none; } }
 /* Source column — Meta leads show the campaign/ad name under the Meta pill */
+/* funnel tag shown in the leads name cell when viewing "All funnels" */
+.fnl-tag {
+  display: inline-block; margin-right: 7px; padding: 1px 7px; border-radius: 6px;
+  font-size: 0.66rem; font-weight: 800; letter-spacing: 0.02em; vertical-align: middle;
+}
+.fnl-tag--paid { background: rgba(91,33,182,0.12); color: #5b21b6; }
+.fnl-tag--free { background: rgba(22,163,74,0.14); color: #15803d; }
 .src-meta { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 .src-ad {
   max-width: 200px; font-size: 0.72rem; font-weight: 600; line-height: 1.25;
@@ -968,6 +992,12 @@
 .tpl-seats input:focus { outline: none; border-color: var(--crm-primary); }
 .tpl-seats-note { font-size: 0.74rem; font-weight: 500; color: var(--crm-muted-strong); }
 .seat-cap-note { margin-top: -6px; font-size: 0.74rem; font-weight: 600; color: var(--crm-primary); }
+/* Slots read-only combined ("All funnels") view */
+.adm-slot-allnote { margin-top: 12px; }
+.slot-day--ro .slot-day-head { margin-bottom: 0; }
+.slot-day--ro .slot-date { display: flex; align-items: center; }
+.slot-ro-summary { font-size: 0.82rem; font-weight: 600; color: var(--crm-muted-strong); }
+.slot-ro-off { font-style: normal; color: var(--crm-red-deep, #b91c1c); font-weight: 700; }
 .adm-link--add { color: var(--crm-primary); }
 /* add-slot picker — chips of the day's removed/missing times */
 .slot-addbar {

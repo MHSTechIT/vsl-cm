@@ -3,6 +3,9 @@ import { query } from '../db.js'
 import { config } from '../config.js'
 import { releaseExpiredHolds } from '../lib/holds.js'
 import { applySlotDrip, applyDripAll } from '../lib/drip.js'
+import { parseFunnel } from '../lib/funnel.js'
+import { watiConfigured, watiPaymentSuccess } from '../lib/wati.js'
+import { sendWhatsApp, confirmationMessage } from '../lib/whapi.js'
 import { ah } from '../lib/ah.js'
 
 export const slotsRouter = Router()
@@ -26,7 +29,8 @@ export function isPastSlot(dateISO, label, nowMs = Date.now()) {
 // Dates that still have at least one available slot (for the calendar).
 slotsRouter.get(
   '/dates',
-  ah(async (_req, res) => {
+  ah(async (req, res) => {
+    const funnel = parseFunnel(req.query.funnel)
     await releaseExpiredHolds()
     await applyDripAll()
     // Only 'available' seats are bookable. A 'pending' seat is RESERVED for the
@@ -39,11 +43,15 @@ slotsRouter.get(
       `SELECT slot_date, slot_time,
               COUNT(*) FILTER (WHERE status = 'available') AS available
          FROM slots
-        WHERE slot_date >= CURRENT_DATE
+        WHERE slot_date >= CURRENT_DATE AND funnel = $1
         GROUP BY slot_date, slot_time`,
+      [funnel],
     )
     // dates the admin has switched OFF — hidden from the public calendar
-    const { rows: offDays } = await query(`SELECT slot_date FROM slot_days WHERE active = false`)
+    const { rows: offDays } = await query(
+      `SELECT slot_date FROM slot_days WHERE active = false AND funnel = $1`,
+      [funnel],
+    )
     const hidden = new Set(offDays.map((r) => isoDate(r.slot_date)))
     const now = Date.now()
     const byDate = new Map()
@@ -73,9 +81,13 @@ slotsRouter.get(
   ah(async (req, res) => {
     await releaseExpiredHolds()
     const date = String(req.query.date || '')
+    const funnel = parseFunnel(req.query.funnel)
     if (!date) return res.status(400).json({ error: 'date required' })
     // date switched off by the admin → no bookable times
-    const off = await query(`SELECT 1 FROM slot_days WHERE slot_date = $1 AND active = false`, [date])
+    const off = await query(
+      `SELECT 1 FROM slot_days WHERE slot_date = $1 AND funnel = $2 AND active = false`,
+      [date, funnel],
+    )
     if (off.rows.length) return res.json([])
     await applySlotDrip(date)
     const { rows } = await query(
@@ -83,10 +95,10 @@ slotsRouter.get(
               COUNT(*) FILTER (WHERE status = 'available') AS left,
               COUNT(*) AS total
          FROM slots
-        WHERE slot_date = $1
+        WHERE slot_date = $1 AND funnel = $2
         GROUP BY slot_time
         ORDER BY MIN(id)`,
-      [date],
+      [date, funnel],
     )
     const now = Date.now()
     res.json(
@@ -106,6 +118,7 @@ slotsRouter.post(
     const name = String(req.body?.name || '').trim()
     const date = String(req.body?.date || '')
     const time = String(req.body?.time || '')
+    const funnel = parseFunnel(req.body?.funnel)
     if (!phone || !date || !time) {
       return res.status(400).json({ error: 'phone, date and time required' })
     }
@@ -121,12 +134,12 @@ slotsRouter.post(
               hold_expires_at = now() + ($4 || ' minutes')::interval
         WHERE id = (
           SELECT id FROM slots
-           WHERE slot_date = $2 AND slot_time = $3 AND status = 'available'
+           WHERE slot_date = $2 AND slot_time = $3 AND status = 'available' AND funnel = $5
            ORDER BY id LIMIT 1
            FOR UPDATE SKIP LOCKED
         )
         RETURNING id, slot_date, slot_time, hold_expires_at`,
-      [phone, date, time, String(mins)],
+      [phone, date, time, String(mins), funnel],
     )
     if (!rows.length) {
       return res.status(409).json({ error: 'this time is now full — please pick another' })
@@ -159,6 +172,57 @@ slotsRouter.post(
       holdExpiresAt: slot.hold_expires_at,
       holdWindowMinutes: mins,
     })
+  }),
+)
+
+// FREE funnel — confirm the held seat directly, no payment. Flips the lead's
+// pending hold (in the free funnel) to 'confirmed' and fires the booking
+// WhatsApp. There is no money involved, so the lead is marked booked via
+// payment_status = 'free' (not 'success').
+slotsRouter.post(
+  '/free-confirm',
+  ah(async (req, res) => {
+    await releaseExpiredHolds()
+    const phone = String(req.body?.phone || '').replace(/\D/g, '')
+    if (!phone) return res.status(400).json({ error: 'phone required' })
+
+    // Claim THIS phone's pending free-funnel hold → confirmed.
+    const { rows } = await query(
+      `UPDATE slots
+          SET status = 'confirmed', lead_phone = $1, hold_expires_at = NULL
+        WHERE id = (
+          SELECT id FROM slots
+           WHERE held_by_phone = $1 AND status = 'pending' AND funnel = 'free'
+           ORDER BY id LIMIT 1
+           FOR UPDATE SKIP LOCKED
+        )
+        RETURNING slot_date, slot_time`,
+      [phone],
+    )
+    if (!rows.length) {
+      return res.status(409).json({ error: 'no held slot to confirm — please pick a time again' })
+    }
+    const slot = rows[0]
+    const date = isoDate(slot.slot_date)
+    const time = slot.slot_time
+
+    await query(
+      `UPDATE leads
+          SET slot_date = $2, slot_time = $3, slot_status = 'confirmed',
+              payment_status = 'free', wa_payment = 'success', updated_at = now()
+        WHERE phone = $1`,
+      [phone, date, time],
+    )
+
+    // Booking-confirmation WhatsApp (same templates as a paid booking).
+    if (watiConfigured()) {
+      const dmy = date.split('-').reverse().join('/') // YYYY-MM-DD → DD/MM/YYYY
+      watiPaymentSuccess(phone, { date: dmy, time }).catch(() => {})
+    } else {
+      sendWhatsApp(phone, confirmationMessage(date, time), 'confirmation').catch(() => {})
+    }
+
+    res.json({ ok: true, date, time })
   }),
 )
 

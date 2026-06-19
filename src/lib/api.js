@@ -1,6 +1,9 @@
 // Thin API client. In dev, calls go to /api and Vite proxies them to the
 // backend (see vite.config.js). In prod set VITE_API_URL to the API origin.
+import { getFunnel } from './funnel.js'
+
 const BASE = import.meta.env.VITE_API_URL || ''
+const FUNNEL = getFunnel() // 'paid' | 'free' — tags every funnel-scoped call
 
 // Traffic source + (for Meta ads) which campaign/ad the visitor came from.
 // source is 'meta' when they arrived from a Meta/Facebook ad (fbclid or a
@@ -51,18 +54,20 @@ async function req(path, options = {}) {
 }
 
 export const api = {
+  funnel: FUNNEL,
+
   // public landing-page config (video, poster, booking-reveal time)
-  config: () => req('/api/config'),
+  config: () => req(`/api/config?funnel=${FUNNEL}`),
 
   // public proof / testimonial cards
-  testimonials: () => req('/api/testimonials'),
+  testimonials: () => req(`/api/testimonials?funnel=${FUNNEL}`),
 
   // Form 1
   register: (name, phone) => {
     const t = getTrafficInfo()
     return req('/api/leads', {
       method: 'POST',
-      body: JSON.stringify({ name, phone, source: t.source, sourceDetail: t.detail }),
+      body: JSON.stringify({ name, phone, source: t.source, sourceDetail: t.detail, funnel: FUNNEL }),
     })
   },
 
@@ -75,10 +80,18 @@ export const api = {
     }),
 
   // slots / Form 2
-  slotDates: () => req('/api/slots/dates'),
-  slotsForDate: (date) => req(`/api/slots?date=${encodeURIComponent(date)}`),
+  slotDates: () => req(`/api/slots/dates?funnel=${FUNNEL}`),
+  slotsForDate: (date) =>
+    req(`/api/slots?date=${encodeURIComponent(date)}&funnel=${FUNNEL}`),
   holdSlot: (phone, name, date, time) =>
-    req('/api/slots/hold', { method: 'POST', body: JSON.stringify({ phone, name, date, time }) }),
+    req('/api/slots/hold', {
+      method: 'POST',
+      body: JSON.stringify({ phone, name, date, time, funnel: FUNNEL }),
+    }),
+
+  // free funnel — confirm the held slot directly (no payment)
+  freeConfirm: (phone) =>
+    req('/api/slots/free-confirm', { method: 'POST', body: JSON.stringify({ phone }) }),
 
   // payment
   createOrder: (phone) =>

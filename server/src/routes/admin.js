@@ -8,12 +8,17 @@ import { applyDripAll, applySlotDrip } from '../lib/drip.js'
 import { isoDate, isPastSlot, slotStartEpoch } from './slots.js'
 import { ah } from '../lib/ah.js'
 import { setSetting, getSettings } from '../lib/settings.js'
+import { parseFunnel } from '../lib/funnel.js'
 import { syncLeadsToSheet, spreadsheetIdFromUrl, isConfigured as googleConfigured } from '../lib/google-sheets.js'
 import { sendSessionMessage, watiConfigured, watiPaymentSuccess } from '../lib/wati.js'
 import { sendWhatsApp, confirmationMessage } from '../lib/whapi.js'
 import { paymentContact, orderPaymentContact } from '../lib/razorpay.js'
 
 export const adminRouter = Router()
+
+// Which funnel the admin is viewing. The admin client sends ?funnel=paid|free
+// on every request; leads / slots / content / testimonials are scoped to it.
+const funnelOf = (req) => parseFunnel(req.query?.funnel)
 
 // Files are stored IN the database (media table), so multer keeps them in memory
 // just long enough to insert the bytes. (Heavier on RAM for big videos.)
@@ -67,7 +72,7 @@ adminRouter.use((req, res, next) => {
 })
 
 // Staff are scoped to the Leads + WATI pages only.
-const STAFF_ALLOW = [/^\/me$/, /^\/leads$/, /^\/leads\/[^/]+\/hc$/, /^\/wa\//]
+const STAFF_ALLOW = [/^\/me$/, /^\/leads$/, /^\/leads\/[^/]+\/hc$/, /^\/leads\/[^/]+\/converted$/, /^\/wa\//]
 adminRouter.use((req, res, next) => {
   if (req.role !== 'staff') return next()
   if (STAFF_ALLOW.some((rx) => rx.test(req.path))) return next()
@@ -87,7 +92,7 @@ adminRouter.get(
 // Dashboard: counts, funnel, watch-time breakdown.
 adminRouter.get(
   '/stats',
-  ah(async (_req, res) => {
+  ah(async (req, res) => {
     const { rows } = await query(`
       SELECT
         COUNT(*)                                AS registered,
@@ -98,7 +103,8 @@ adminRouter.get(
         COUNT(*) FILTER (WHERE form2_submitted) AS form2,
         COUNT(*) FILTER (WHERE paid)            AS paid
       FROM leads
-    `)
+      WHERE funnel = $1
+    `, [funnelOf(req)])
     const r = rows[0]
     res.json({
       registered: Number(r.registered),
@@ -136,14 +142,19 @@ async function backfillPayPhones(rows) {
 // CRM table — all leads, newest first.
 adminRouter.get(
   '/leads',
-  ah(async (_req, res) => {
+  ah(async (req, res) => {
+    // funnel=all → both funnels (no filter); otherwise scope to one.
+    const all = String(req.query?.funnel || '').toLowerCase() === 'all'
     const { rows } = await query(
       `SELECT phone, name, registered_at, watch_percent, form2_submitted,
               slot_date, slot_time, slot_status, paid, paid_at, needs_wa,
               payment_phone, payment_status, wa_payment, wa_1h_sent, hc_status, hc_data,
-              rzp_payment_id, rzp_order_id, source, source_detail
+              converted,
+              rzp_payment_id, rzp_order_id, source, source_detail, funnel
          FROM leads
+        ${all ? '' : 'WHERE funnel = $1'}
         ORDER BY registered_at DESC`,
+      all ? [] : [funnelOf(req)],
     )
     res.json(rows.map((r) => ({ ...r, slot_date: r.slot_date ? isoDate(r.slot_date) : null })))
     backfillPayPhones(rows) // fire-and-forget — next refresh shows the numbers
@@ -309,14 +320,31 @@ adminRouter.post(
   }),
 )
 
+// Toggle a lead's "converted" flag (enrolled/closed) from the CRM table.
+adminRouter.post(
+  '/leads/:phone/converted',
+  ah(async (req, res) => {
+    const phone = String(req.params.phone).replace(/\D/g, '')
+    const converted = Boolean(req.body?.converted)
+    await query(
+      `UPDATE leads SET converted = $2, updated_at = now() WHERE phone = $1`,
+      [phone, converted],
+    )
+    res.json({ ok: true, converted })
+  }),
+)
+
 // Slot management — time slots grouped by date, each with seat counts.
 adminRouter.get(
   '/slots',
-  ah(async (_req, res) => {
+  ah(async (req, res) => {
+    // funnel=all → both funnels (date cards tagged); otherwise scope to one.
+    const all = String(req.query?.funnel || '').toLowerCase() === 'all'
+    const funnel = funnelOf(req)
     await releaseExpiredHolds()
     await applyDripAll()
     const { rows } = await query(`
-      SELECT slot_date, slot_time,
+      SELECT slot_date, slot_time, funnel,
              COUNT(*)                                   AS capacity,
              COUNT(*) FILTER (WHERE status='available') AS available,
              COUNT(*) FILTER (WHERE status='pending')   AS pending,
@@ -326,18 +354,24 @@ adminRouter.get(
              COUNT(*) FILTER (WHERE status='blocked' AND COALESCE(release_wave, 1) = 1) AS wave1,
              COUNT(*) FILTER (WHERE status='blocked' AND release_wave = 2)              AS wave2
         FROM slots
-       GROUP BY slot_date, slot_time
+       ${all ? '' : 'WHERE funnel = $1'}
+       GROUP BY slot_date, slot_time, funnel
        ORDER BY slot_date, MIN(id)
-    `)
+    `, all ? [] : [funnel])
     const nowMs = Date.now()
     // per-date publish state (missing row = active)
-    const { rows: dayRows } = await query(`SELECT slot_date, active FROM slot_days`)
-    const activeMap = new Map(dayRows.map((r) => [isoDate(r.slot_date), r.active]))
-    const byDate = new Map()
+    const { rows: dayRows } = await query(
+      `SELECT slot_date, active, funnel FROM slot_days ${all ? '' : 'WHERE funnel = $1'}`,
+      all ? [] : [funnel],
+    )
+    const activeMap = new Map(dayRows.map((r) => [`${r.funnel}|${isoDate(r.slot_date)}`, r.active]))
+    // Group by (funnel, date) so an "all" view shows one card per funnel per date.
+    const byKey = new Map()
     for (const r of rows) {
       const d = isoDate(r.slot_date)
-      if (!byDate.has(d)) byDate.set(d, [])
-      byDate.get(d).push({
+      const key = `${r.funnel}|${d}`
+      if (!byKey.has(key)) byKey.set(key, { date: d, funnel: r.funnel, slots: [] })
+      byKey.get(key).slots.push({
         time: r.slot_time,
         capacity: Number(r.capacity),
         available: Number(r.available),
@@ -353,11 +387,12 @@ adminRouter.get(
     // Sort each day's slots by their actual start time (chronological), not by
     // creation order — so a slot added later (e.g. 11am) still shows first.
     res.json(
-      [...byDate.entries()].map(([date, slots]) => ({
-        date,
-        active: activeMap.has(date) ? activeMap.get(date) : true,
-        slots: slots.sort(
-          (a, b) => (slotStartEpoch(date, a.time) ?? 0) - (slotStartEpoch(date, b.time) ?? 0),
+      [...byKey.values()].map((g) => ({
+        date: g.date,
+        funnel: g.funnel,
+        active: activeMap.has(`${g.funnel}|${g.date}`) ? activeMap.get(`${g.funnel}|${g.date}`) : true,
+        slots: g.slots.sort(
+          (a, b) => (slotStartEpoch(g.date, a.time) ?? 0) - (slotStartEpoch(g.date, b.time) ?? 0),
         ),
       })),
     )
@@ -371,11 +406,12 @@ adminRouter.post(
   ah(async (req, res) => {
     const date = String(req.body?.date || '')
     const active = Boolean(req.body?.active)
+    const funnel = funnelOf(req)
     if (!date) return res.status(400).json({ error: 'date required' })
     await query(
-      `INSERT INTO slot_days (slot_date, active) VALUES ($1, $2)
-       ON CONFLICT (slot_date) DO UPDATE SET active = $2`,
-      [date, active],
+      `INSERT INTO slot_days (slot_date, funnel, active) VALUES ($1, $3, $2)
+       ON CONFLICT (slot_date, funnel) DO UPDATE SET active = $2`,
+      [date, active, funnel],
     )
     res.json({ ok: true, active })
   }),
@@ -388,6 +424,7 @@ adminRouter.post(
   ah(async (req, res) => {
     const date = String(req.body?.date || '')
     const time = String(req.body?.time || '')
+    const funnel = funnelOf(req)
     const seats = Math.max(0, Math.min(50, Math.round(Number(req.body?.seats) || 0)))
     if (!date || !time) return res.status(400).json({ error: 'date and time required' })
 
@@ -396,8 +433,8 @@ adminRouter.post(
     if (seats === 0) {
       await query(
         `UPDATE slots SET status = 'permanent', release_wave = NULL
-          WHERE slot_date = $1 AND slot_time = $2 AND status IN ('available', 'blocked')`,
-        [date, time],
+          WHERE slot_date = $1 AND slot_time = $2 AND funnel = $3 AND status IN ('available', 'blocked')`,
+        [date, time, funnel],
       )
       return res.json({ ok: true, seats: 0, permanent: true })
     }
@@ -405,8 +442,8 @@ adminRouter.post(
     // any positive number first releases permanent seats back to available
     await query(
       `UPDATE slots SET status = 'available'
-        WHERE slot_date = $1 AND slot_time = $2 AND status = 'permanent'`,
-      [date, time],
+        WHERE slot_date = $1 AND slot_time = $2 AND funnel = $3 AND status = 'permanent'`,
+      [date, time, funnel],
     )
 
     const { rows } = await query(
@@ -414,8 +451,8 @@ adminRouter.post(
          COUNT(*)                                       AS total,
          COUNT(*) FILTER (WHERE status='available')     AS available,
          COUNT(*) FILTER (WHERE status<>'available')    AS locked
-       FROM slots WHERE slot_date=$1 AND slot_time=$2`,
-      [date, time],
+       FROM slots WHERE slot_date=$1 AND slot_time=$2 AND funnel=$3`,
+      [date, time, funnel],
     )
     const total = Number(rows[0].total)
     const available = Number(rows[0].available)
@@ -425,15 +462,15 @@ adminRouter.post(
     if (target > total) {
       const add = target - total
       for (let i = 0; i < add; i++) {
-        await query(`INSERT INTO slots (slot_date, slot_time) VALUES ($1, $2)`, [date, time])
+        await query(`INSERT INTO slots (slot_date, slot_time, funnel) VALUES ($1, $2, $3)`, [date, time, funnel])
       }
     } else if (target < total) {
       const remove = Math.min(total - target, available)
       await query(
         `DELETE FROM slots WHERE id IN (
-           SELECT id FROM slots WHERE slot_date=$1 AND slot_time=$2 AND status='available'
-           ORDER BY id DESC LIMIT $3)`,
-        [date, time, remove],
+           SELECT id FROM slots WHERE slot_date=$1 AND slot_time=$2 AND funnel=$3 AND status='available'
+           ORDER BY id DESC LIMIT $4)`,
+        [date, time, funnel, remove],
       )
     }
     res.json({ ok: true, seats: target })
@@ -447,14 +484,15 @@ adminRouter.get(
   ah(async (req, res) => {
     const date = String(req.query?.date || '')
     const time = String(req.query?.time || '')
+    const funnel = funnelOf(req)
     if (!date || !time) return res.status(400).json({ error: 'date and time required' })
     const { rows } = await query(
       `SELECT s.id, s.status, s.lead_phone, s.manual, l.name AS lead_name
          FROM slots s
          LEFT JOIN leads l ON l.phone = s.lead_phone
-        WHERE s.slot_date = $1 AND s.slot_time = $2
+        WHERE s.slot_date = $1 AND s.slot_time = $2 AND s.funnel = $3
         ORDER BY s.id`,
-      [date, time],
+      [date, time, funnel],
     )
     res.json(
       rows.map((r) => ({
@@ -476,12 +514,13 @@ adminRouter.post(
   ah(async (req, res) => {
     const date = String(req.body?.date || '')
     const time = String(req.body?.time || '')
+    const funnel = funnelOf(req)
     if (!date || !time) return res.status(400).json({ error: 'date and time required' })
-    const tpl = await getSettings(['slot_template_seats'])
+    const tpl = await getSettings(['slot_template_seats'], funnel)
     const maxSeats = Math.max(1, Math.min(20, parseInt(tpl.slot_template_seats, 10) || 1))
     const { rows: cnt } = await query(
-      `SELECT COUNT(*) AS n FROM slots WHERE slot_date = $1 AND slot_time = $2`,
-      [date, time],
+      `SELECT COUNT(*) AS n FROM slots WHERE slot_date = $1 AND slot_time = $2 AND funnel = $3`,
+      [date, time, funnel],
     )
     if (Number(cnt[0].n) >= maxSeats) {
       return res
@@ -489,8 +528,8 @@ adminRouter.post(
         .json({ error: `max ${maxSeats} seat${maxSeats > 1 ? 's' : ''} per slot — raise "Seats per slot" in Template` })
     }
     const { rows } = await query(
-      `INSERT INTO slots (slot_date, slot_time) VALUES ($1, $2) RETURNING id`,
-      [date, time],
+      `INSERT INTO slots (slot_date, slot_time, funnel) VALUES ($1, $2, $3) RETURNING id`,
+      [date, time, funnel],
     )
     res.json({ ok: true, id: rows[0].id })
   }),
@@ -592,8 +631,8 @@ adminRouter.post(
     // 'permanent' placeholder), so a time with no usable seats reads as locked.
     // Use the chip's × ("remove") control to delete the time entirely.
     const { rows: rest } = await query(
-      `SELECT COUNT(*) AS n FROM slots WHERE slot_date = $1 AND slot_time = $2 AND id <> $3`,
-      [date, time, seatId],
+      `SELECT COUNT(*) AS n FROM slots WHERE slot_date = $1 AND slot_time = $2 AND funnel = $4 AND id <> $3`,
+      [date, time, seatId, funnelOf(req)],
     )
     if (Number(rest[0].n) === 0) {
       await query(
@@ -616,10 +655,11 @@ adminRouter.post(
   ah(async (req, res) => {
     const date = String(req.body?.date || '')
     const time = String(req.body?.time || '')
+    const funnel = funnelOf(req)
     if (!date || !time) return res.status(400).json({ error: 'date and time required' })
     const { rowCount } = await query(
-      `DELETE FROM slots WHERE slot_date=$1 AND slot_time=$2 AND status<>'confirmed'`,
-      [date, time],
+      `DELETE FROM slots WHERE slot_date=$1 AND slot_time=$2 AND funnel=$3 AND status<>'confirmed'`,
+      [date, time, funnel],
     )
     res.json({ ok: true, removed: rowCount })
   }),
@@ -633,16 +673,17 @@ adminRouter.post(
   ah(async (req, res) => {
     const date = String(req.body?.date || '')
     const times = Array.isArray(req.body?.times) ? req.body.times : []
+    const funnel = funnelOf(req)
     if (!date || !times.length) return res.status(400).json({ error: 'date and times[] required' })
     if (times.length > 20) return res.status(400).json({ error: 'max 20 slots per day' })
 
-    // Skip times already opened for this date.
+    // Skip times already opened for this date (in this funnel).
     const newTimes = []
     for (const t of times) {
       const time = String(t)
       const { rows } = await query(
-        `SELECT 1 FROM slots WHERE slot_date=$1 AND slot_time=$2 LIMIT 1`,
-        [date, time],
+        `SELECT 1 FROM slots WHERE slot_date=$1 AND slot_time=$2 AND funnel=$3 LIMIT 1`,
+        [date, time, funnel],
       )
       if (!rows.length) newTimes.push(time)
     }
@@ -651,7 +692,7 @@ adminRouter.post(
     // Template settings: how many bookable seats each NEW time gets (seats per
     // slot, default 1), and which times to lock by default. Each new time is
     // created with exactly `seatsPerSlot` available seats.
-    const tpl = await getSettings(['slot_template_locked', 'slot_template_seats'])
+    const tpl = await getSettings(['slot_template_locked', 'slot_template_seats'], funnel)
     const seatsPerSlot = Math.max(1, Math.min(20, parseInt(tpl.slot_template_seats, 10) || 1))
 
     const N = newTimes.length
@@ -659,8 +700,8 @@ adminRouter.post(
     for (let t = 0; t < N; t++) {
       for (let k = 0; k < seatsPerSlot; k++) {
         await query(
-          `INSERT INTO slots (slot_date, slot_time, status) VALUES ($1, $2, 'available')`,
-          [date, newTimes[t]],
+          `INSERT INTO slots (slot_date, slot_time, status, funnel) VALUES ($1, $2, 'available', $3)`,
+          [date, newTimes[t], funnel],
         )
         created++
       }
@@ -672,8 +713,8 @@ adminRouter.post(
     if (Array.isArray(tplLocked) && tplLocked.length) {
       await query(
         `UPDATE slots SET status = 'permanent', release_wave = NULL
-          WHERE slot_date = $1 AND slot_time = ANY($2) AND status IN ('available', 'blocked')`,
-        [date, tplLocked],
+          WHERE slot_date = $1 AND slot_time = ANY($2) AND funnel = $3 AND status IN ('available', 'blocked')`,
+        [date, tplLocked, funnel],
       )
     }
     res.json({ ok: true, created, blocked: 0, seatsPerSlot })
@@ -684,8 +725,8 @@ adminRouter.post(
 // how many bookable seats each time gets (seats per slot).
 adminRouter.get(
   '/slots/template',
-  ah(async (_req, res) => {
-    const s = await getSettings(['slot_template_locked', 'slot_template_seats'])
+  ah(async (req, res) => {
+    const s = await getSettings(['slot_template_locked', 'slot_template_seats'], funnelOf(req))
     let locked = []
     try { locked = JSON.parse(s.slot_template_locked || '[]') } catch { /* ignore */ }
     const seats = Math.max(1, Math.min(20, parseInt(s.slot_template_seats, 10) || 1))
@@ -695,10 +736,11 @@ adminRouter.get(
 adminRouter.post(
   '/slots/template',
   ah(async (req, res) => {
+    const funnel = funnelOf(req)
     const locked = Array.isArray(req.body?.locked) ? req.body.locked.map(String) : []
     const seats = Math.max(1, Math.min(20, parseInt(req.body?.seats, 10) || 1))
-    await setSetting('slot_template_locked', JSON.stringify(locked))
-    await setSetting('slot_template_seats', String(seats))
+    await setSetting('slot_template_locked', JSON.stringify(locked), funnel)
+    await setSetting('slot_template_seats', String(seats), funnel)
     res.json({ ok: true, locked, seats })
   }),
 )
@@ -709,16 +751,17 @@ adminRouter.post(
   ah(async (req, res) => {
     const date = String(req.body?.date || '')
     const time = String(req.body?.time || '')
+    const funnel = funnelOf(req)
     const wave = Number(req.body?.wave) === 2 ? 2 : 1
     if (!date || !time) return res.status(400).json({ error: 'date and time required' })
     const { rowCount } = await query(
       `UPDATE slots SET release_wave = $3
         WHERE id = (SELECT id FROM slots
-                     WHERE slot_date = $1 AND slot_time = $2 AND status = 'blocked'
+                     WHERE slot_date = $1 AND slot_time = $2 AND funnel = $4 AND status = 'blocked'
                        AND COALESCE(release_wave, 1) <> $3
                      ORDER BY id LIMIT 1)
         RETURNING id`,
-      [date, time, wave],
+      [date, time, wave, funnel],
     )
     res.json({ ok: true, moved: rowCount })
   }),
@@ -730,15 +773,16 @@ adminRouter.post(
   ah(async (req, res) => {
     const date = String(req.body?.date || '')
     const time = String(req.body?.time || '')
+    const funnel = funnelOf(req)
     const wave = Number(req.body?.wave) === 2 ? 2 : 1
     if (!date || !time) return res.status(400).json({ error: 'date and time required' })
     const { rowCount } = await query(
       `UPDATE slots SET status = 'blocked', release_wave = $3
         WHERE id = (SELECT id FROM slots
-                     WHERE slot_date = $1 AND slot_time = $2 AND status = 'available'
+                     WHERE slot_date = $1 AND slot_time = $2 AND funnel = $4 AND status = 'available'
                      ORDER BY id LIMIT 1)
         RETURNING id`,
-      [date, time, wave],
+      [date, time, wave, funnel],
     )
     if (!rowCount) return res.status(409).json({ error: 'no open seat at that time' })
     res.json({ ok: true })
@@ -751,14 +795,15 @@ adminRouter.post(
   ah(async (req, res) => {
     const date = String(req.body?.date || '')
     const time = String(req.body?.time || '')
+    const funnel = funnelOf(req)
     if (!date || !time) return res.status(400).json({ error: 'date and time required' })
     const { rowCount } = await query(
       `UPDATE slots SET status = 'available', release_wave = NULL
         WHERE id = (SELECT id FROM slots
-                     WHERE slot_date = $1 AND slot_time = $2 AND status = 'blocked'
+                     WHERE slot_date = $1 AND slot_time = $2 AND funnel = $3 AND status = 'blocked'
                      ORDER BY id LIMIT 1)
         RETURNING id`,
-      [date, time],
+      [date, time, funnel],
     )
     if (!rowCount) return res.status(409).json({ error: 'no blocked seat at that time' })
     res.json({ ok: true })
@@ -770,10 +815,11 @@ adminRouter.post(
   '/slots/close',
   ah(async (req, res) => {
     const date = String(req.body?.date || '')
+    const funnel = funnelOf(req)
     if (!date) return res.status(400).json({ error: 'date required' })
     const { rowCount } = await query(
-      `DELETE FROM slots WHERE slot_date = $1 AND status <> 'confirmed'`,
-      [date],
+      `DELETE FROM slots WHERE slot_date = $1 AND funnel = $2 AND status <> 'confirmed'`,
+      [date, funnel],
     )
     res.json({ ok: true, removed: rowCount })
   }),
@@ -791,8 +837,8 @@ function vimeoIdFrom(input) {
 // Landing-page config: current video + thumbnail + booking-reveal time.
 adminRouter.get(
   '/config',
-  ah(async (_req, res) => {
-    const s = await getSettings(['video_id', 'thumb_id', 'reveal_seconds', 'vimeo_id'])
+  ah(async (req, res) => {
+    const s = await getSettings(['video_id', 'thumb_id', 'reveal_seconds', 'vimeo_id'], funnelOf(req))
     res.json({
       videoId: s.video_id ? Number(s.video_id) : null,
       thumbId: s.thumb_id ? Number(s.thumb_id) : null,
@@ -809,10 +855,11 @@ adminRouter.post(
   '/config',
   upload.fields([{ name: 'video', maxCount: 1 }, { name: 'thumb', maxCount: 1 }]),
   ah(async (req, res) => {
-    const prev = await getSettings(['video_id', 'thumb_id'])
+    const funnel = funnelOf(req)
+    const prev = await getSettings(['video_id', 'thumb_id'], funnel)
     if (req.files?.video?.[0]) {
       const id = await storeMedia('video', req.files.video[0])
-      await setSetting('video_id', id)
+      await setSetting('video_id', id, funnel)
       const old = Number(prev.video_id)
       if (old && old !== id) {
         await query(`DELETE FROM media WHERE id = $1`, [old]).catch(() => {})
@@ -820,7 +867,7 @@ adminRouter.post(
     }
     if (req.files?.thumb?.[0]) {
       const id = await storeMedia('thumb', req.files.thumb[0])
-      await setSetting('thumb_id', id)
+      await setSetting('thumb_id', id, funnel)
       const old = Number(prev.thumb_id)
       if (old && old !== id) {
         await query(`DELETE FROM media WHERE id = $1`, [old]).catch(() => {})
@@ -828,12 +875,12 @@ adminRouter.post(
     }
     if (req.body?.revealSeconds != null && req.body.revealSeconds !== '') {
       const secs = Math.max(0, Math.round(Number(req.body.revealSeconds)) || 0)
-      await setSetting('reveal_seconds', secs)
+      await setSetting('reveal_seconds', secs, funnel)
     }
     // Vimeo link — when set, the landing page plays from Vimeo instead of the
     // DB-stored file. Pass an empty string to clear it (back to the DB video).
     if (req.body?.vimeoUrl != null) {
-      await setSetting('vimeo_id', vimeoIdFrom(req.body.vimeoUrl))
+      await setSetting('vimeo_id', vimeoIdFrom(req.body.vimeoUrl), funnel)
     }
     res.json({ ok: true })
   }),
@@ -855,8 +902,11 @@ function mapTestimonial(r) {
 
 adminRouter.get(
   '/testimonials',
-  ah(async (_req, res) => {
-    const { rows } = await query(`SELECT * FROM testimonials ORDER BY sort_order, id`)
+  ah(async (req, res) => {
+    const { rows } = await query(
+      `SELECT * FROM testimonials WHERE funnel = $1 ORDER BY sort_order, id`,
+      [funnelOf(req)],
+    )
     res.json(rows.map(mapTestimonial))
   }),
 )
@@ -866,12 +916,13 @@ adminRouter.post(
   upload.single('image'),
   ah(async (req, res) => {
     const b = req.body || {}
+    const funnel = funnelOf(req)
     const name = String(b.name || '').trim()
     if (!name) return res.status(400).json({ error: 'name is required' })
     const imageId = req.file ? await storeMedia('report', req.file) : null
     const { rows } = await query(
-      `INSERT INTO testimonials (name, body, stat_before, stat_after, stat_text, today, image_id, sort_order)
-       VALUES ($1,$2,$3,$4,$5,$6,$7, COALESCE((SELECT MAX(sort_order)+1 FROM testimonials), 0))
+      `INSERT INTO testimonials (name, body, stat_before, stat_after, stat_text, today, image_id, funnel, sort_order)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8, COALESCE((SELECT MAX(sort_order)+1 FROM testimonials WHERE funnel=$8), 0))
        RETURNING *`,
       [
         name,
@@ -881,6 +932,7 @@ adminRouter.post(
         b.statText || null,
         b.today || null,
         imageId,
+        funnel,
       ],
     )
     res.json(mapTestimonial(rows[0]))
