@@ -8,5 +8,9 @@ dist
 .env
 **/.env
 
+# runtime logs
+*.log
+**/server.log
+
 # original full-res source image — only the resized public/award.jpg ships
 /award.jpg

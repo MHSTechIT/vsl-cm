@@ -597,6 +597,59 @@ adminRouter.post(
   }),
 )
 
+// Add a brand-new lead (name + phone only) and book it into a seat — no payment
+// recorded. Everything else on the lead stays empty (paid/payment_status/etc.
+// remain null). Used by the "+ Add lead" button in the seat picker.
+adminRouter.post(
+  '/slots/seat/add-lead',
+  ah(async (req, res) => {
+    const date = String(req.body?.date || '')
+    const time = String(req.body?.time || '')
+    const seatId = Number(req.body?.seatId)
+    const name = String(req.body?.name || '').trim()
+    const phone = String(req.body?.phone || '').replace(/\D/g, '')
+    const funnel = funnelOf(req)
+    if (!date || !time || !Number.isFinite(seatId) || !name || !phone)
+      return res.status(400).json({ error: 'name, phone, date, time and seatId required' })
+
+    const seatRows = await query(
+      `SELECT id, status, manual FROM slots WHERE id = $1 AND slot_date = $2 AND slot_time = $3 AND funnel = $4`,
+      [seatId, date, time, funnel],
+    )
+    if (!seatRows.rows.length) return res.status(404).json({ error: 'seat not found' })
+    if (seatRows.rows[0].status === 'confirmed' && !seatRows.rows[0].manual)
+      return res.status(409).json({ error: 'that seat is a real paid booking' })
+
+    // Create (or reuse) the lead — only name + phone; all other fields stay empty.
+    await query(
+      `INSERT INTO leads (phone, name, funnel) VALUES ($1, $2, $3)
+       ON CONFLICT (phone) DO UPDATE SET name = EXCLUDED.name, updated_at = now()`,
+      [phone, name, funnel],
+    )
+    // Release any other manual seat this lead occupies (avoid dupes).
+    await query(
+      `UPDATE slots SET status = 'available', lead_phone = NULL, held_by_phone = NULL,
+              hold_expires_at = NULL, manual = false
+        WHERE lead_phone = $1 AND id <> $2 AND manual = true`,
+      [phone, seatId],
+    )
+    // Book this seat for the lead (flagged manual; NO payment is recorded).
+    await query(
+      `UPDATE slots SET status = 'confirmed', lead_phone = $2, held_by_phone = NULL,
+              hold_expires_at = NULL, manual = true
+        WHERE id = $1`,
+      [seatId, phone],
+    )
+    await query(
+      `UPDATE leads SET slot_date = $2, slot_time = $3, slot_status = 'confirmed', updated_at = now()
+        WHERE phone = $1`,
+      [phone, date, time],
+    )
+    applySlotDrip(date).catch(() => {})
+    res.json({ ok: true, name })
+  }),
+)
+
 // Delete a seat (per-seat "del"). Empty/blocked/manual seats only — a real paid
 // booking is protected. A manual booking also clears the lead's booking.
 adminRouter.post(

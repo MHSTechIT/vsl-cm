@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { proof } from '../content.js'
 import { ImagePlaceholder } from './Placeholder.jsx'
 import { api } from '../lib/api.js'
+import { isFreeFunnel } from '../lib/funnel.js'
+import SwipeDeck from './SwipeDeck.jsx'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
 const abs = (p) => (p ? `${API_BASE}${p}` : '')
@@ -20,7 +22,7 @@ function Stat({ stat }) {
 
 function Card({ card, num }) {
   return (
-    <article className="card">
+    <article className="card" data-reveal="scale">
       <span className="card-pin" aria-hidden="true" />
       <span className="card-num">{String(num).padStart(2, '0')}</span>
 
@@ -62,13 +64,17 @@ export default function ProofCards() {
 
   return (
     <section className="wrap" id="proof">
-      <h2 className="center">{proof.heading}</h2>
+      <h2 className="center" data-reveal>{proof.heading}</h2>
 
-      <div className="cards-stack">
-        {cards.map((card, i) => (
-          <Card key={card.id ?? i} card={card} num={i + 1} />
-        ))}
-      </div>
+      {isFreeFunnel() ? (
+        <div data-reveal="scale"><SwipeDeck cards={cards} /></div>
+      ) : (
+        <div className="cards-stack">
+          {cards.map((card, i) => (
+            <Card key={card.id ?? i} card={card} num={i + 1} />
+          ))}
+        </div>
+      )}
 
       <p className="cards-footer">{proof.footer}</p>
     </section>

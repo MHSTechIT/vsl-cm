@@ -4,11 +4,11 @@ import { faq } from '../content.js'
 export default function FAQ() {
   return (
     <section className="wrap" id="faq">
-      <h2>{faq.heading}</h2>
+      <h2 data-reveal>{faq.heading}</h2>
 
       <div className="faq">
         {faq.items.map((item, i) => (
-          <details key={i}>
+          <details key={i} data-reveal>
             <summary>{item.q}</summary>
             <div className="answer">{item.a}</div>
           </details>

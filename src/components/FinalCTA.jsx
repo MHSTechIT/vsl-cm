@@ -16,7 +16,7 @@ export default function FinalCTA() {
 
   return (
     <section className="wrap final-cta" id="final">
-      <h2>{finalCta.heading}</h2>
+      <h2 data-reveal>{finalCta.heading}</h2>
       {bookingOpen && (
         <>
           <CTAButton id="cta-final" where="final" />

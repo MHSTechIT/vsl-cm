@@ -180,8 +180,26 @@ export default function BookingModal({ onClose }) {
 
   async function confirmAndPay() {
     setErr('')
-    if (!name.trim() || phone.replace(/\D/g, '').length < 8 || !date || !time) {
-      setErr('Please enter your details and pick a date + time.')
+    // Name: letters (and spaces) only — no digits or symbols.
+    const cleanName = name.trim()
+    if (!/^[A-Za-z][A-Za-z ]*$/.test(cleanName)) {
+      setErr('Please enter your name (letters only).')
+      return
+    }
+    // Indian mobile: 10 digits starting 6–9. Strip a leading 0/91 country code
+    // only when EXTRA digits are present (same rule as the old Form 1 gate).
+    let local = phone.replace(/\D/g, '')
+    if (local.length > 10) local = local.replace(/^(0+|91)/, '')
+    if (!/^[6-9]\d{9}$/.test(local)) {
+      setErr('Enter a valid 10-digit mobile number.')
+      return
+    }
+    if (/^(\d)\1{9}$/.test(local)) {
+      setErr('Please enter your real WhatsApp number.')
+      return
+    }
+    if (!date || !time) {
+      setErr('Please pick a date and time.')
       return
     }
 
@@ -197,11 +215,11 @@ export default function BookingModal({ onClose }) {
     setStatus('paying')
     try {
       // ensure the lead exists (Form 2 may be the first touch for warm traffic)
-      const { phone: saved } = await api.register(name.trim(), phone)
-      saveLead({ name: name.trim(), phone: saved })
+      const { phone: saved } = await api.register(cleanName, local)
+      saveLead({ name: cleanName, phone: saved })
 
       // claim one seat for this time (the backend returns the seat id)
-      const hold = await api.holdSlot(saved, name.trim(), date, time)
+      const hold = await api.holdSlot(saved, cleanName, date, time)
       const slotId = hold.slotId
       startHoldCountdown(hold.holdExpiresAt)
 
@@ -244,9 +262,24 @@ export default function BookingModal({ onClose }) {
         currency: order.currency,
         order_id: order.orderId,
         name: 'My Health School',
-        description: 'Health assessment — ₹50',
-        prefill: { name: name.trim(), contact: saved },
-        theme: { color: '#6d28d9' },
+        description: '1:1 Consultation',
+        prefill: { name: cleanName, contact: saved },
+        // Brand accent + a dark branded backdrop behind the popup.
+        theme: { color: '#6d28d9', backdrop_color: '#1e1b2e' },
+        // Show a UPI block first (India-first funnel), with the other methods
+        // — cards, netbanking, wallets — kept below it.
+        config: {
+          display: {
+            blocks: {
+              upi: { name: 'Pay using UPI', instruments: [{ method: 'upi' }] },
+            },
+            sequence: ['block.upi'],
+            preferences: { show_default_blocks: true },
+          },
+        },
+        // Payment countdown shown in Checkout — auto-closes at zero.
+        // Kept in sync with the seat-hold window (HOLD_WINDOW_MINUTES).
+        timeout: 600, // 10 minutes
         handler: async (resp) => {
           try {
             const r = await api.verifyPayment({
@@ -262,8 +295,19 @@ export default function BookingModal({ onClose }) {
             setStatus('form')
           }
         },
-        // keep polling after dismiss — a QR payment may still land
-        modal: { ondismiss: () => { if (!doneRef.current) setStatus('form') } },
+        // Payer exited the Razorpay popup → free their held seat right away
+        // (don't wait for the hold to expire) so others can book it. Only frees
+        // a 'pending' seat, so a payment that already succeeded is never undone.
+        modal: {
+          ondismiss: () => {
+            if (doneRef.current) return // payment already confirmed — leave it
+            clearInterval(pollTimer.current)
+            clearInterval(holdTimer.current)
+            setSecsLeft(0)
+            api.releaseSlot(saved).catch(() => {})
+            setStatus('form')
+          },
+        },
       })
       rzpRef.current = rzp
       rzp.open()
@@ -337,15 +381,18 @@ export default function BookingModal({ onClose }) {
               className="reg-input"
               placeholder="Your name"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              autoComplete="name"
+              onChange={(e) => setName(e.target.value.replace(/[^A-Za-z ]/g, ''))}
             />
             <input
               className="reg-input"
               type="tel"
               inputMode="numeric"
-              placeholder="Phone number"
+              placeholder="WhatsApp number"
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              maxLength={10}
+              autoComplete="tel"
+              onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
             />
 
             <p className="modal-label">Select a date</p>

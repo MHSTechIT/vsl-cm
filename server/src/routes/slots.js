@@ -175,6 +175,34 @@ slotsRouter.post(
   }),
 )
 
+// Release a seat the payer is holding — called when they exit the Razorpay
+// popup (or cancel) so the seat goes back to 'available' immediately instead
+// of waiting for the hold to expire. Only frees a 'pending' seat held by this
+// phone, so a seat already 'confirmed' by a successful payment is never freed.
+slotsRouter.post(
+  '/release',
+  ah(async (req, res) => {
+    const phone = String(req.body?.phone || '').replace(/\D/g, '')
+    if (!phone) return res.status(400).json({ error: 'phone required' })
+
+    const { rows } = await query(
+      `UPDATE slots
+          SET status = 'available', held_by_phone = NULL, hold_expires_at = NULL
+        WHERE held_by_phone = $1 AND status = 'pending'
+        RETURNING id`,
+      [phone],
+    )
+    // mirror the lead's slot status back to nothing-booked
+    await query(
+      `UPDATE leads
+          SET slot_status = NULL, updated_at = now()
+        WHERE phone = $1 AND slot_status = 'pending'`,
+      [phone],
+    )
+    res.json({ ok: true, released: rows.length })
+  }),
+)
+
 // FREE funnel — confirm the held seat directly, no payment. Flips the lead's
 // pending hold (in the free funnel) to 'confirmed' and fires the booking
 // WhatsApp. There is no money involved, so the lead is marked booked via

@@ -855,3 +855,141 @@ p:last-child { margin-bottom: 0; }
   border-radius: 50%; animation: paySpin 0.8s linear infinite;
 }
 @keyframes paySpin { to { transform: rotate(360deg); } }
+
+/* ============================================================
+   FREE FUNNEL — motion polish (sugarfit-style animation feel).
+   Scoped to body.is-free-funnel (set in main.jsx) so the paid
+   funnel + admin are never touched. Purple theme is untouched —
+   this is pure motion. All wrapped in prefers-reduced-motion.
+   ============================================================ */
+/* keyframes at top level (NOT nested in @media — nested @keyframes don't
+   resolve reliably across browsers). */
+@keyframes ff-rise     { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@keyframes ff-rise-sm  { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes ff-pop      { from { opacity: 0; transform: scale(0.96); }      to { opacity: 1; transform: none; } }
+@keyframes ff-fade     { from { opacity: 0; }                              to { opacity: 1; } }
+@keyframes ff-modal-in { from { opacity: 0; transform: translateY(14px) scale(0.97); } to { opacity: 1; transform: none; } }
+@keyframes ff-pop-sel  { 0% { transform: scale(1); } 50% { transform: scale(1.08); } 100% { transform: scale(1); } }
+@keyframes ff-tick-pop { 0% { opacity: 0; transform: scale(0.2); } 60% { opacity: 1; transform: scale(1.15); } 100% { transform: scale(1); } }
+@keyframes ff-ring     { from { opacity: 0.45; transform: translate(-50%, -50%) scale(0.6); } to { opacity: 0; transform: translate(-50%, -50%) scale(1.9); } }
+@keyframes ff-shine    { 0% { transform: translateX(-160%) skewX(-18deg); } 18%, 100% { transform: translateX(230%) skewX(-18deg); } }
+@media (prefers-reduced-motion: no-preference) {
+  /* — SCROLL REVEAL (the defining sugarfit/Framer "appear" motion) —
+     marked blocks ([data-reveal]) start faded + offset and ease in as they enter
+     the viewport (class .is-in added by src/lib/scrollReveal.js). The .is-in
+     resting state is a plain opacity:1 rule, so content can never get stuck
+     hidden even if the motion itself doesn't run. */
+  body.is-free-funnel [data-reveal] {
+    opacity: 0;
+    transform: translateY(34px);
+    transition: opacity 0.7s ease, transform 0.75s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  body.is-free-funnel [data-reveal="scale"] { transform: scale(0.9); }
+  body.is-free-funnel [data-reveal="left"]  { transform: translateX(-44px); }
+  body.is-free-funnel [data-reveal="right"] { transform: translateX(44px); }
+  body.is-free-funnel [data-reveal].is-in { opacity: 1; transform: none; }
+
+  /* — registration gate spring-in — */
+  body.is-free-funnel .reg-gate { animation: ff-pop 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+
+  /* — input focus glow + lift — */
+  body.is-free-funnel .reg-input { transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease; }
+  body.is-free-funnel .reg-input:focus { box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.18); transform: translateY(-1px); }
+
+  /* — primary buttons: glossy shine sweep + lift/press (ghost excluded) — */
+  body.is-free-funnel .cta { position: relative; overflow: hidden; }
+  body.is-free-funnel .cta:not(.cta-ghost)::after {
+    content: ''; position: absolute; top: 0; left: 0; width: 55%; height: 100%;
+    background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.38), transparent);
+    transform: translateX(-160%) skewX(-18deg); pointer-events: none;
+    animation: ff-shine 3.4s ease-in-out infinite;
+  }
+
+  /* — booking modal: backdrop fade + card spring-in — */
+  body.is-free-funnel .modal-backdrop { animation: ff-fade 0.25s ease both; }
+  body.is-free-funnel .modal { animation: ff-modal-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+
+  /* — calendar + time slots: fade-up, with a light stagger on slots — */
+  body.is-free-funnel .bk-cal { animation: ff-rise-sm 0.35s ease-out both; }
+  body.is-free-funnel .bk-slot { animation: ff-rise-sm 0.3s ease-out both; }
+  body.is-free-funnel .bk-slot:nth-child(1) { animation-delay: 0.02s; }
+  body.is-free-funnel .bk-slot:nth-child(2) { animation-delay: 0.05s; }
+  body.is-free-funnel .bk-slot:nth-child(3) { animation-delay: 0.08s; }
+  body.is-free-funnel .bk-slot:nth-child(4) { animation-delay: 0.11s; }
+  body.is-free-funnel .bk-slot:nth-child(5) { animation-delay: 0.14s; }
+  body.is-free-funnel .bk-slot:nth-child(6) { animation-delay: 0.17s; }
+  body.is-free-funnel .bk-slot:nth-child(n+7) { animation-delay: 0.2s; }
+  body.is-free-funnel .bk-day.is-sel, body.is-free-funnel .bk-slot.is-sel { animation: ff-pop-sel 0.28s ease; }
+
+  /* — success card: tick pop + expanding ring, then text fade-up — */
+  body.is-free-funnel .booking-done .booking-tick { position: relative; animation: ff-tick-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+  body.is-free-funnel .booking-done .booking-tick::after {
+    content: ''; position: absolute; top: 50%; left: 50%; width: 54px; height: 54px;
+    border-radius: 50%; border: 2px solid var(--good); pointer-events: none;
+    animation: ff-ring 0.65s ease-out 0.1s both;
+  }
+  body.is-free-funnel .booking-done h3 { animation: ff-rise-sm 0.4s ease-out 0.12s both; }
+  body.is-free-funnel .booking-done p  { animation: ff-rise-sm 0.4s ease-out 0.22s both; }
+}
+
+/* ============================================================
+   FREE FUNNEL — proof cards as a sugarfit-style swipe deck.
+   Cards are stacked in one place; the next ones peek behind and a
+   swipe (drag) brings the next card to the front. (SwipeDeck.jsx,
+   rendered only on the free funnel — see ProofCards.jsx.)
+   ============================================================ */
+.deck-wrap { width: 100%; max-width: 620px; margin: 0 auto; }
+.deck { position: relative; width: 100%; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.deck-card {
+  position: absolute; top: 0; left: 0; width: 100%; box-sizing: border-box;
+  background: #fff; border-radius: 22px; padding: 24px 26px 22px;
+  box-shadow: 0 20px 48px rgba(40, 28, 102, 0.16);
+  transform-origin: 50% 100%;
+  transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.42s ease;
+}
+.deck-card.is-active { cursor: grab; }
+.deck-card.is-active:active { cursor: grabbing; }
+
+.dk-badge {
+  position: absolute; top: 16px; right: 0;
+  background: linear-gradient(135deg, var(--accent-light), var(--accent-dark));
+  color: #fff; font-size: 0.72rem; font-weight: 800;
+  padding: 6px 14px 6px 16px; border-radius: 10px 0 0 10px;
+  box-shadow: 0 6px 16px rgba(91, 33, 182, 0.32);
+}
+
+.dk-top { display: flex; gap: 16px; align-items: flex-start; padding-right: 70px; }
+.dk-photo {
+  flex: 0 0 84px; width: 84px; height: 84px; border-radius: 16px;
+  object-fit: cover; background: var(--bg-soft);
+}
+.dk-photo--ph { display: flex; align-items: center; justify-content: center; font-size: 2rem; }
+.dk-quote { margin: 0; color: var(--body); font-size: 0.98rem; line-height: 1.55; text-align: left; }
+
+.dk-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 18px; flex-wrap: wrap; }
+.dk-id { display: flex; flex-direction: column; gap: 4px; }
+.dk-name { font-weight: 800; color: var(--ink); font-size: 0.98rem; }
+.dk-stars { color: #f5b301; letter-spacing: 2px; font-size: 0.95rem; }
+
+.dk-hba { display: flex; align-items: center; gap: 10px; background: var(--bg-soft); border-radius: 14px; padding: 10px 16px; }
+.dk-hba-label { font-size: 0.7rem; font-weight: 700; color: var(--muted); line-height: 1.12; text-align: left; }
+.dk-hba-label i { font-style: normal; color: var(--soft-grey); font-weight: 600; }
+.dk-hba-before { font-size: 1.7rem; font-weight: 800; color: #e23744; }
+.dk-hba-after  { font-size: 1.7rem; font-weight: 800; color: #16a34a; }
+.dk-hba-arrow  { color: var(--soft-grey); font-size: 1.1rem; }
+
+.dk-dots { display: flex; justify-content: center; gap: 8px; margin-top: 22px; }
+.dk-dots button {
+  width: 8px; height: 8px; border-radius: 50%; border: none; padding: 0; cursor: pointer;
+  background: var(--line); transition: background 0.2s ease, width 0.2s ease;
+}
+.dk-dots button.on { background: var(--accent); width: 22px; border-radius: 5px; }
+
+@media (max-width: 560px) {
+  .deck-card { padding: 20px 18px; }
+  .dk-top { flex-direction: column; padding-right: 0; gap: 12px; }
+  .dk-photo { width: 72px; height: 72px; flex-basis: 72px; }
+  .dk-foot { flex-direction: column; align-items: stretch; }
+  .dk-hba { justify-content: center; }
+  .dk-badge { font-size: 0.66rem; padding: 5px 10px; }
+}

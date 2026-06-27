@@ -4,17 +4,18 @@ import { doctor } from '../content.js'
 export default function AboutDoctor() {
   return (
     <section className="wrap" id="about">
-      <h2>{doctor.heading}</h2>
+      <h2 data-reveal>{doctor.heading}</h2>
 
       <img
         className="doctor-photo"
+        data-reveal="scale"
         src="/award.jpg"
         alt="Doctor Farmer receiving an award with his students"
         loading="lazy"
       />
 
       {doctor.paragraphs.map((para, i) => (
-        <p key={i}>{para}</p>
+        <p key={i} data-reveal>{para}</p>
       ))}
     </section>
   )

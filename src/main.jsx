@@ -3,7 +3,12 @@ import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import Admin from './admin/Admin.jsx'
 import PaymentSuccess from './components/PaymentSuccess.jsx'
+import { isFreeFunnel } from './lib/funnel.js'
 import './styles.css'
+
+// Free funnel gets the extra motion polish (animations scoped to this class so
+// the paid funnel + admin are never affected).
+if (isFreeFunnel()) document.body.classList.add('is-free-funnel')
 
 // Simple path-based split: /admin → admin panel, /payment-success → the
 // Razorpay redirect landing, everything else → the funnel page. (Vite's SPA

@@ -743,15 +743,16 @@ function Leads() {
   function exportCsv() {
     const head = ['Name', 'Phone', 'Funnel', 'Source', 'Pay phone', 'Watch%', 'Watch time', 'Form2', 'Slot date & time',
       'WA payment', 'WA 1-hr', 'Registered at', 'Pay at', 'Payment status', 'Converted']
-    const lines = filtered.map((r) => [
+    const lines = [...filtered].reverse().map((r) => [
       r.name, r.phone,
       r.funnel === 'free' ? 'Free' : 'Paid',
       r.source === 'meta' ? (r.source_detail ? `Meta: ${r.source_detail}` : 'Meta') : 'WhatsApp',
       r.payment_phone || '', r.watch_percent,
       fmtWatchTime(r.watch_percent, duration),
       r.form2_submitted ? 'yes' : 'no',
-      ((r.payment_status || (r.paid ? 'success' : null)) === 'success'
-        || (r.payment_status || (r.paid ? 'success' : null)) === 'manual') && r.slot_date
+      r.slot_date && (r.slot_status === 'confirmed'
+        || (r.payment_status || (r.paid ? 'success' : null)) === 'success'
+        || (r.payment_status || (r.paid ? 'success' : null)) === 'manual')
         ? `${r.slot_date} ${r.slot_time}` : '',
       r.wa_payment || '',
       r.wa_1h_sent ? 'yes' : 'no',
@@ -921,7 +922,7 @@ function Leads() {
                 <td className="adm-mono">{r.watch_percent}%</td>
                 <td className="adm-mono">{fmtWatchTime(r.watch_percent, duration)}</td>
                 <td>{r.form2_submitted ? <Pill c="blue">Yes</Pill> : <span className="adm-dash">—</span>}</td>
-                <td>{(payStatus === 'success' || payStatus === 'manual') && r.slot_date
+                <td>{r.slot_date && (r.slot_status === 'confirmed' || payStatus === 'success' || payStatus === 'manual')
                   ? `${fmtDate(r.slot_date)} · ${r.slot_time}`
                   : <span className="adm-dash">—</span>}</td>
                 <td>
@@ -1296,6 +1297,16 @@ function Slots({ funnel, onFunnel }) {
     } catch (e) { setSeatErr(e.message) }
     finally { setSeatBusy(false) }
   }
+  // "+ Add lead" — create a new lead (name + phone only) and book it into the seat.
+  async function addLeadToSeat(seat, name, phone) {
+    setSeatBusy(true); setSeatErr('')
+    try {
+      await adminApi.addLeadSeat(seatEdit.date, seatEdit.time, seat.id, name, phone)
+      setPicker(null)
+      await loadSeats(seatEdit.date, seatEdit.time)
+    } catch (e) { setSeatErr(e.message) }
+    finally { setSeatBusy(false) }
+  }
   function removeTime(d, time) {
     setAsk({
       message: `Remove the ${time} slot?`,
@@ -1531,6 +1542,7 @@ function Slots({ funnel, onFunnel }) {
             <LeadPicker
               busy={seatBusy}
               onPick={(phone) => assignLead(picker, phone)}
+              onAddLead={(name, phone) => addLeadToSeat(picker, name, phone)}
               onClose={() => setPicker(null)}
             />
           )}
@@ -1599,36 +1611,70 @@ function Slots({ funnel, onFunnel }) {
 }
 
 // ---------- Lead picker (search + select a lead to manually book a seat) ----------
-function LeadPicker({ onPick, onClose, busy }) {
+function LeadPicker({ onPick, onAddLead, onClose, busy }) {
   const [rows, setRows] = useState([])
   const [q, setQ] = useState('')
+  const [adding, setAdding] = useState(false) // "+ Add lead" form mode
+  const [nm, setNm] = useState('')
+  const [ph, setPh] = useState('')
+  const [err, setErr] = useState('')
   useEffect(() => { adminApi.leads().then(setRows).catch(() => setRows([])) }, [])
   const filtered = rows.filter((r) =>
     !q || `${r.name} ${r.phone}`.toLowerCase().includes(q.toLowerCase()),
   )
+  function submitNew() {
+    const phone = ph.replace(/\D/g, '')
+    if (!nm.trim() || phone.length < 10) { setErr('Enter a name and a 10-digit phone number.'); return }
+    setErr('')
+    onAddLead(nm.trim(), phone)
+  }
   return (
     <div className="adm-overlay adm-overlay--nested" onClick={(e) => { e.stopPropagation(); onClose() }}>
       <div className="adm-dialog adm-picker" onClick={(e) => e.stopPropagation()}>
-        <h3>Choose a lead</h3>
-        <input
-          className="seat-search"
-          placeholder="Search name or phone"
-          value={q}
-          autoFocus
-          onChange={(e) => setQ(e.target.value)}
-        />
-        <div className="picker-rows">
-          {filtered.map((r) => (
-            <button key={r.phone} className="picker-row" disabled={busy} onClick={() => onPick(r.phone)}>
-              <span className="picker-name">{r.name}</span>
-              <span className="picker-phone">{r.phone}{r.paid && <em className="picker-paid"> · booked</em>}</span>
-            </button>
-          ))}
-          {filtered.length === 0 && <p className="adm-empty">No leads match.</p>}
-        </div>
-        <div className="adm-dialog-actions">
-          <button className="adm-btn adm-btn-ghost" onClick={onClose}>Cancel</button>
-        </div>
+        {adding ? (
+          <>
+            <h3>Add a lead</h3>
+            <input className="seat-search" placeholder="Name" value={nm} autoFocus
+              onChange={(e) => setNm(e.target.value)} />
+            <input className="seat-search" placeholder="Phone number" type="tel" inputMode="numeric"
+              value={ph} maxLength={10}
+              onChange={(e) => setPh(e.target.value.replace(/\D/g, '').slice(0, 10))} />
+            {err && <p className="adm-msg adm-seat-err">{err}</p>}
+            <div className="adm-dialog-actions">
+              <button className="adm-btn adm-btn-ghost" disabled={busy}
+                onClick={() => { setAdding(false); setErr('') }}>Back</button>
+              <button className="adm-btn adm-btn-primary" disabled={busy} onClick={submitNew}>
+                {busy ? 'Adding…' : 'OK'}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <h3>Choose a lead</h3>
+            <input
+              className="seat-search"
+              placeholder="Search name or phone"
+              value={q}
+              autoFocus
+              onChange={(e) => setQ(e.target.value)}
+            />
+            <div className="picker-rows">
+              {filtered.map((r) => (
+                <button key={r.phone} className="picker-row" disabled={busy} onClick={() => onPick(r.phone)}>
+                  <span className="picker-name">{r.name}</span>
+                  <span className="picker-phone">{r.phone}{r.paid && <em className="picker-paid"> · booked</em>}</span>
+                </button>
+              ))}
+              {filtered.length === 0 && <p className="adm-empty">No leads match.</p>}
+            </div>
+            <div className="adm-dialog-actions">
+              <button className="adm-btn adm-btn-ghost" onClick={onClose}>Cancel</button>
+              <button className="adm-btn adm-btn-primary" onClick={() => { setAdding(true); setErr('') }}>
+                + Add lead
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

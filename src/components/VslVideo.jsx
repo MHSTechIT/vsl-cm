@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
-import { getLead, saveLead } from '../lib/session.js'
+import { getLead } from '../lib/session.js'
 import { openBooking } from '../lib/booking.js'
-import { trackRegistered, trackVideo15Min } from '../lib/tracking.js'
+import { trackVideo15Min } from '../lib/tracking.js'
 
 const ENV_SRC = import.meta.env.VITE_VSL_SRC || '' // optional fallback
 const API_BASE = import.meta.env.VITE_API_URL || '' // prefix for /uploads in prod
@@ -34,58 +34,6 @@ function loadVimeo() {
   })
 }
 
-// ---- Form 1: Name + WhatsApp (shown after the play button is pressed) ----
-function RegistrationGate({ onSubmit }) {
-  const [name, setName] = useState('')
-  const [phone, setPhone] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
-
-  async function submit(e) {
-    e.preventDefault()
-    setErr('')
-    if (!name.trim()) {
-      setErr('Please enter your name.')
-      return
-    }
-    // Indian mobile: require 10 digits starting 6–9. Only strip a leading 0/91
-    // country code when EXTRA digits are present — never from a bare 10-digit
-    // number (e.g. 9176xxxxxx legitimately starts with "91").
-    let local = phone.replace(/\D/g, '')
-    if (local.length > 10) local = local.replace(/^(0+|91)/, '')
-    if (!/^[6-9]\d{9}$/.test(local)) {
-      setErr('Enter a valid 10-digit mobile number.')
-      return
-    }
-    if (/^(\d)\1{9}$/.test(local)) {
-      setErr('Please enter your real WhatsApp number.')
-      return
-    }
-    setBusy(true)
-    try {
-      await onSubmit(name.trim(), local)
-    } catch (e2) {
-      setErr(e2.message || 'Something went wrong. Please try again.')
-      setBusy(false)
-    }
-  }
-
-  return (
-    <form className="reg-gate" onSubmit={submit}>
-      <p className="reg-gate-title">Login To Watch The Training Video</p>
-      <input className="reg-input" type="text" placeholder="Your name" value={name}
-        onChange={(e) => setName(e.target.value)} autoComplete="name" autoFocus />
-      <input className="reg-input" type="tel" inputMode="numeric" placeholder="WhatsApp number" value={phone}
-        onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-        maxLength={10} autoComplete="tel" />
-      {err && <p className="reg-error">{err}</p>}
-      <button type="submit" className="cta reg-submit" disabled={busy}>
-        {busy ? 'Please wait…' : 'Watch Now'}
-      </button>
-    </form>
-  )
-}
-
 // True watch percent: sum of the ranges the viewer actually played, relative
 // to the video's real duration — works the same for a 2-min or 15-min video
 // and isn't inflated by dragging the scrubber forward.
@@ -98,8 +46,6 @@ function playedPercent(v) {
 
 // ---- Player + gate + watch-time tracking ----
 export default function VslVideo() {
-  const [registered, setRegistered] = useState(Boolean(getLead()?.phone))
-  const [stage, setStage] = useState('play') // play | form
   const [cfg, setCfg] = useState(null)
   const [vPlaying, setVPlaying] = useState(false)
   const [vMuted, setVMuted] = useState(false)
@@ -134,15 +80,12 @@ export default function VslVideo() {
   }
 
   useEffect(() => {
-    const onChange = () => setRegistered(Boolean(getLead()?.phone))
-    window.addEventListener('lead-changed', onChange)
     api.config()
       .then((c) => {
         setCfg(c)
         // a permanent Vimeo video always exists, so we never auto-unlock here
       })
       .catch(() => { if (!ENV_SRC) unlockBooking(unlocked) })
-    return () => window.removeEventListener('lead-changed', onChange)
   }, [])
 
   function fire(checkpoint, percent) {
@@ -183,8 +126,17 @@ export default function VslVideo() {
       try { videoRef.current?.pause?.() } catch { /* ignore */ }
       flushProgress()
     }
+    // Resume from the exact spot when the booking modal closes.
+    const onBookingClose = () => {
+      try { vimeoPlayerRef.current?.play?.()?.catch?.(() => {}) } catch { /* ignore */ }
+      try { videoRef.current?.play?.()?.catch?.(() => {}) } catch { /* ignore */ }
+    }
     window.addEventListener('open-booking', onBookingOpen)
-    return () => window.removeEventListener('open-booking', onBookingOpen)
+    window.addEventListener('close-booking', onBookingClose)
+    return () => {
+      window.removeEventListener('open-booking', onBookingOpen)
+      window.removeEventListener('close-booking', onBookingClose)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -283,13 +235,8 @@ export default function VslVideo() {
 
   // Start playback INSIDE the tap so iOS allows sound. iOS only honours an
   // unmuted play() that runs synchronously within the user gesture — any await
-  // (network) or requestAnimationFrame first makes it "autoplay", which iOS is
-  // forced to mute. So we play (unmuted) first, then register in the background.
-  function handleSubmit(name, phone) {
-    saveLead({ name, phone }) // optimistic — so watch-time tracking has the phone
-    setRegistered(true)
-    trackRegistered() // Form 1 submitted → video unlocks
-
+  // (network) first makes it "autoplay", which iOS is forced to mute.
+  function playNow() {
     if (vimeoId) {
       const p = vimeoPlayerRef.current
       try { p?.setMuted?.(false); p?.setVolume?.(1) } catch { /* ignore */ }
@@ -297,10 +244,6 @@ export default function VslVideo() {
     } else {
       videoRef.current?.play?.().catch(() => {})
     }
-    // Persist the lead without blocking the gesture (don't await before play).
-    api.register(name, phone)
-      .then(({ phone: saved }) => saveLead({ name, phone: saved }))
-      .catch(() => {})
   }
 
   // ---- custom Vimeo controls: play / mute / fullscreen ----
@@ -331,30 +274,23 @@ export default function VslVideo() {
           {!started && (
             <div className="vsl-vimeo-poster" style={{ backgroundImage: `url(${poster})` }} aria-hidden="true" />
           )}
-          {registered && !started && (
-            <button type="button" className="vfx-play-center" aria-label="Play video"
-              onClick={() => {
-                const p = vimeoPlayerRef.current
-                try { p?.setMuted?.(false); p?.setVolume?.(1) } catch { /* ignore */ }
-                p?.play?.().catch(() => {})
-              }}>
+          {!started && (
+            <button type="button" className="vfx-play-center" aria-label="Play video" onClick={playNow}>
               <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg>
               <span>Play Video</span>
             </button>
           )}
           {bookReady && isFs && (
             <button type="button" className="vfx-book" onClick={bookFromPlayer}>
-              Book my slot — ₹50 →
+              Book 1:1 Consultation →
             </button>
           )}
-          {registered && (
-            <div className="vfx-bar">
-              <span className="vfx-spacer" />
-              <button type="button" className="vfx-btn" onClick={vFullscreen} aria-label="Fullscreen">
-                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" /></svg>
-              </button>
-            </div>
-          )}
+          <div className="vfx-bar">
+            <span className="vfx-spacer" />
+            <button type="button" className="vfx-btn" onClick={vFullscreen} aria-label="Fullscreen">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" /></svg>
+            </button>
+          </div>
         </div>
       ) : src ? (
         <video
@@ -363,7 +299,7 @@ export default function VslVideo() {
           ref={videoRef}
           src={src}
           poster={poster}
-          controls={registered}
+          controls
           controlsList="nodownload noplaybackrate noremoteplayback"
           disablePictureInPicture
           playsInline
@@ -378,37 +314,17 @@ export default function VslVideo() {
           id="vsl-video"
           style={poster ? { backgroundImage: `url(${poster})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}
         >
-          {registered && (
-            <>
-              <span>[VSL video — upload it in the admin panel]</span>
-              {import.meta.env.DEV && (
-                <div className="vsl-sim">
-                  <span className="vsl-sim-label">dev: simulate watch-time</span>
-                  <div className="vsl-sim-btns">
-                    <button type="button" onClick={() => fire('25', 25)}>25%</button>
-                    <button type="button" onClick={() => fire('50', 50)}>50%</button>
-                    <button type="button" onClick={() => { fire('75', 75); unlockBooking(unlocked) }}>75%</button>
-                    <button type="button" onClick={() => { fire('finished', 100); unlockBooking(unlocked) }}>finish</button>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Gate overlay: centered play button → Name/WhatsApp form → play */}
-      {!registered && (
-        <div className={`gate-overlay ${stage === 'form' ? 'gate-overlay--form' : ''}`}>
-          {stage === 'play' ? (
-            <button className="gate-play" aria-label="Play video" onClick={() => setStage('form')}>
-              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <path d="M8 5v14l11-7z" />
-              </svg>
-              <span>Play Video</span>
-            </button>
-          ) : (
-            <RegistrationGate onSubmit={handleSubmit} />
+          <span>[VSL video — upload it in the admin panel]</span>
+          {import.meta.env.DEV && (
+            <div className="vsl-sim">
+              <span className="vsl-sim-label">dev: simulate watch-time</span>
+              <div className="vsl-sim-btns">
+                <button type="button" onClick={() => fire('25', 25)}>25%</button>
+                <button type="button" onClick={() => fire('50', 50)}>50%</button>
+                <button type="button" onClick={() => { fire('75', 75); unlockBooking(unlocked) }}>75%</button>
+                <button type="button" onClick={() => { fire('finished', 100); unlockBooking(unlocked) }}>finish</button>
+              </div>
+            </div>
           )}
         </div>
       )}

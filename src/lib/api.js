@@ -93,6 +93,10 @@ export const api = {
   freeConfirm: (phone) =>
     req('/api/slots/free-confirm', { method: 'POST', body: JSON.stringify({ phone }) }),
 
+  // release a held (pending) seat — on payment exit/cancel, frees it immediately
+  releaseSlot: (phone) =>
+    req('/api/slots/release', { method: 'POST', body: JSON.stringify({ phone }) }),
+
   // payment
   createOrder: (phone) =>
     req('/api/payment/order', { method: 'POST', body: JSON.stringify({ phone }) }),

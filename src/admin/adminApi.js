@@ -101,6 +101,8 @@ export const adminApi = {
     req('/slots/date/active', { method: 'POST', body: JSON.stringify({ date, active }) }),
   assignSeat: (date, time, seatId, phone) =>
     req('/slots/seat/assign', { method: 'POST', body: JSON.stringify({ date, time, seatId, phone }) }),
+  addLeadSeat: (date, time, seatId, name, phone) =>
+    req('/slots/seat/add-lead', { method: 'POST', body: JSON.stringify({ date, time, seatId, name, phone }) }),
   freeSeat: (date, time, seatId) =>
     req('/slots/seat/free', { method: 'POST', body: JSON.stringify({ date, time, seatId }) }),
   setWave: (date, time, wave) =>

@@ -12,6 +12,12 @@ export default function BookingModalHost() {
     return () => window.removeEventListener('open-booking', onOpen)
   }, [])
 
+  function close() {
+    setOpen(false)
+    // Tell the VSL player to resume from where it was paused on open.
+    window.dispatchEvent(new CustomEvent('close-booking'))
+  }
+
   if (!open) return null
-  return <BookingModal onClose={() => setOpen(false)} />
+  return <BookingModal onClose={close} />
 }

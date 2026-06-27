@@ -18,21 +18,21 @@ export default function Hero() {
   return (
     <section className="hero-vsl" id="hero">
       <div className="hero-vsl-inner">
-        <span className="hero-badge">{hero.badge}</span>
+        <span className="hero-badge" data-reveal>{hero.badge}</span>
 
-        <h1 className="hero-headline">
+        <h1 className="hero-headline" data-reveal>
           <span className="hl-shine">{hero.headline}</span>{' '}
           <span className="hl">{hero.headlineAccent}</span>
         </h1>
 
-        <p className="hero-subhead">{hero.subhead}</p>
+        <p className="hero-subhead" data-reveal>{hero.subhead}</p>
 
         {/* Form 1 gate + player with watch-time tracking. */}
-        <div className="hero-video">
+        <div className="hero-video" data-reveal="scale">
           <VslVideo />
         </div>
 
-        <p className="caption hero-video-caption">{hero.videoCaption}</p>
+        <p className="caption hero-video-caption" data-reveal>{hero.videoCaption}</p>
 
         {bookingOpen && (
           <>
