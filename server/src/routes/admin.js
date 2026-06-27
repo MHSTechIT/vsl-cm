@@ -153,11 +153,28 @@ adminRouter.get(
               rzp_payment_id, rzp_order_id, source, source_detail, funnel
          FROM leads
         ${all ? '' : 'WHERE funnel = $1'}
-        ORDER BY registered_at DESC`,
+        ORDER BY GREATEST(registered_at, COALESCE(paid_at, registered_at)) DESC`,
       all ? [] : [funnelOf(req)],
     )
     res.json(rows.map((r) => ({ ...r, slot_date: r.slot_date ? isoDate(r.slot_date) : null })))
     backfillPayPhones(rows) // fire-and-forget — next refresh shows the numbers
+  }),
+)
+
+// Payments Razorpay confirmed but that couldn't be tied to any lead (e.g. paid
+// via an old hosted link with a phone that doesn't match a registration). Shown
+// in the Leads report so they can be reconciled. Newest first.
+adminRouter.get(
+  '/unmatched-payments',
+  ah(async (_req, res) => {
+    const { rows } = await query(
+      `SELECT payment_id, order_id, amount, currency, payer_phone, payer_email,
+              received_at, resolved
+         FROM unmatched_payments
+        WHERE resolved = false
+        ORDER BY received_at DESC`,
+    )
+    res.json(rows)
   }),
 )
 

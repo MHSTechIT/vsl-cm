@@ -81,6 +81,7 @@ export const adminApi = {
   addTestimonial: (formData) => postForm('/testimonials', formData),
   deleteTestimonial: (id) => req(`/testimonials/${id}`, { method: 'DELETE' }),
   leads: (funnel) => req(funnel ? `/leads?funnel=${encodeURIComponent(funnel)}` : '/leads'),
+  unmatchedPayments: () => req('/unmatched-payments?funnel=all'),
   deleteLeads: (phones) =>
     req('/leads/delete', { method: 'POST', body: JSON.stringify({ phones }) }),
   slots: (funnel) => req(funnel ? `/slots?funnel=${encodeURIComponent(funnel)}` : '/slots'),

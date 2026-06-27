@@ -672,11 +672,14 @@ function Leads() {
   const [selectMode, setSelectMode] = useState(false) // multi-select-to-delete
   const [selected, setSelected] = useState(() => new Set()) // chosen lead phones
   const [deleting, setDeleting] = useState(false)
+  const [unmatched, setUnmatched] = useState([]) // payments not tied to any lead
+  const [showUnmatched, setShowUnmatched] = useState(false)
   const load = useCallback(
     () => adminApi.leads(funnelFilter).then(setRows).catch(() => {}),
     [funnelFilter],
   )
   useEffect(() => { load() }, [load])
+  useEffect(() => { adminApi.unmatchedPayments().then(setUnmatched).catch(() => {}) }, [])
 
   // Toggle a lead's "converted" flag — optimistic, reverts on failure.
   async function toggleConverted(phone, next) {
@@ -727,11 +730,20 @@ function Leads() {
     }
     if (filter === 'paid') return r.paid
     if (filter === 'unpaid') return !r.paid
+    if (filter === 'failed') return r.payment_status === 'failed'
     if (filter === 'needs-wa') return Boolean(r.needs_wa)
     if (filter === 'hold') return r.slot_status === 'pending'
     if (filter === 'converted') return Boolean(r.converted)
     return true
   })
+
+  // Report summary across all leads in the current funnel.
+  const stats = {
+    total: rows.length,
+    paid: rows.filter((r) => r.paid).length,
+    failed: rows.filter((r) => r.payment_status === 'failed').length,
+    paidToday: rows.filter((r) => r.paid && r.paid_at && localDay(r.paid_at) === todayDay).length,
+  }
 
   // Paginate — 10 leads per page. Jump back to page 1 whenever the search or
   // any filter changes so we never land on a now-empty page.
@@ -837,6 +849,61 @@ function Leads() {
         </div>
       </div>
 
+      {/* Report summary — click a card to filter the table to it */}
+      <div className="adm-report">
+        <button type="button" className={`rep-card ${filter === 'all' ? 'is-on' : ''}`} onClick={() => setFilter('all')}>
+          <span className="rep-num">{stats.total}</span>
+          <span className="rep-lbl">Total leads</span>
+        </button>
+        <button type="button" className={`rep-card rep-good ${filter === 'paid' ? 'is-on' : ''}`} onClick={() => setFilter('paid')}>
+          <span className="rep-num">{stats.paid}</span>
+          <span className="rep-lbl">Paid</span>
+        </button>
+        <button type="button" className={`rep-card rep-bad ${filter === 'failed' ? 'is-on' : ''}`} onClick={() => setFilter('failed')}>
+          <span className="rep-num">{stats.failed}</span>
+          <span className="rep-lbl">Failed payment</span>
+        </button>
+        <div className="rep-card rep-accent">
+          <span className="rep-num">{stats.paidToday}</span>
+          <span className="rep-lbl">Paid today</span>
+        </div>
+        <button type="button" className={`rep-card rep-warn ${showUnmatched ? 'is-on' : ''}`} onClick={() => setShowUnmatched((v) => !v)}>
+          <span className="rep-num">{unmatched.length}</span>
+          <span className="rep-lbl">Unmatched payments</span>
+        </button>
+      </div>
+
+      {showUnmatched && (
+        <div className="adm-unmatched">
+          <div className="adm-unmatched-head">
+            <span><strong>Unmatched payments</strong> — money received but not tied to any lead ({unmatched.length})</span>
+            <button type="button" className="adm-unmatched-x" onClick={() => setShowUnmatched(false)} aria-label="Close">×</button>
+          </div>
+          {unmatched.length === 0 ? (
+            <p className="caption">None — every payment is matched to a lead. 🎉</p>
+          ) : (
+            <div className="adm-unmatched-scroll">
+              <table className="adm-unmatched-tbl">
+                <thead>
+                  <tr><th>Payment ID</th><th>Amount</th><th>Phone</th><th>Email</th><th>Received</th></tr>
+                </thead>
+                <tbody>
+                  {unmatched.map((u) => (
+                    <tr key={u.payment_id}>
+                      <td className="adm-mono">{u.payment_id}</td>
+                      <td>₹{u.amount}</td>
+                      <td className="adm-mono">{u.payer_phone || <span className="adm-dash">—</span>}</td>
+                      <td>{u.payer_email || <span className="adm-dash">—</span>}</td>
+                      <td>{u.received_at ? fmtDateTime(u.received_at) : <span className="adm-dash">—</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="adm-filterbar">
         <input placeholder="Search name or phone" value={q} onChange={(e) => setQ(e.target.value)} />
         <Dropdown
@@ -846,6 +913,7 @@ function Leads() {
             { value: 'all', label: 'All leads' },
             { value: 'paid', label: 'Paid' },
             { value: 'unpaid', label: 'Unpaid' },
+            { value: 'failed', label: 'Failed' },
             { value: 'needs-wa', label: 'Needs WhatsApp' },
             { value: 'hold', label: 'On hold' },
             { value: 'converted', label: 'Converted' },
