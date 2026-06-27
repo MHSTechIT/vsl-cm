@@ -883,6 +883,31 @@ p:last-child { margin-bottom: 0; }
 .ty-next-head { margin: 0 0 12px; font-size: 1.3rem; font-weight: 700; line-height: 1.35; }
 .ty-next-body { margin: 0; font-size: 0.98rem; line-height: 1.65; color: rgba(255, 255, 255, 0.9); }
 
+/* Your details + support contact cards on the Thank You page */
+.ty-card {
+  text-align: left; margin-top: 18px; padding: 20px 24px;
+  background: #fff; border: 1px solid #eee; border-radius: 16px;
+  box-shadow: 0 6px 22px rgba(40, 28, 102, 0.06);
+}
+.ty-card--support { background: #f4f1fc; border-color: #e4ddf6; }
+.ty-card-label {
+  margin: 0 0 12px; font-size: 0.74rem; font-weight: 700;
+  letter-spacing: 0.12em; text-transform: uppercase; color: var(--body);
+}
+.ty-support-intro { margin: 0 0 14px; font-size: 0.95rem; line-height: 1.55; color: var(--body); }
+.ty-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 10px 0; border-top: 1px solid rgba(40, 28, 102, 0.07);
+}
+.ty-card-label + .ty-row, .ty-support-intro + .ty-row { border-top: none; }
+.ty-row span { color: var(--body); font-size: 0.95rem; }
+.ty-row strong { color: var(--accent-deep); font-weight: 700; text-align: right; word-break: break-word; }
+.ty-ref { margin: 22px 0 0; text-align: center; font-size: 0.9rem; color: var(--body); }
+.ty-ref-id { font-family: ui-monospace, 'SF Mono', monospace; color: var(--accent-deep); }
+.ty-home {
+  margin: 22px auto 0; display: inline-block; text-decoration: none;
+}
+
 @media (max-width: 520px) {
   .ty-title { font-size: 1.55rem; }
   .ty-check { width: 66px; height: 66px; font-size: 1.9rem; }

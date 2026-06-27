@@ -62,7 +62,7 @@ async function claimSeat(phone, slotId, takeAvailableIfReleased) {
 // reconciliation). Safe to call repeatedly (webhook retries): a seat is only
 // claimed while one is pending-held. A lead who already paid before can book
 // again with the same phone — their newly held seat still gets confirmed.
-async function confirmPaidLead(phone, slotId = null, paymentId = null, paymentPhone = null, amountPaise = null) {
+async function confirmPaidLead(phone, slotId = null, paymentId = null, paymentPhone = null, amountPaise = null, email = null) {
   const { rows: leadRows } = await query(
     `SELECT paid, name, slot_date, slot_time FROM leads WHERE phone = $1`,
     [phone],
@@ -80,6 +80,11 @@ async function confirmPaidLead(phone, slotId = null, paymentId = null, paymentPh
        ON CONFLICT (payment_id) DO NOTHING`,
       [paymentId, phone, lead.name, (Number(amountPaise) || config.razorpay.pricePaise) / 100],
     ).catch(() => {})
+  }
+  // Capture the email the payer entered in Razorpay (we don't collect it on the
+  // form) — keep the first one seen. Shown on the Thank You page.
+  if (email) {
+    await query(`UPDATE leads SET email = COALESCE(NULLIF(email, ''), $2) WHERE phone = $1`, [phone, String(email)]).catch(() => {})
   }
 
   // Falling back to an 'available' seat is only safe for a first payment —
@@ -193,7 +198,7 @@ async function handlePaymentCaptured(payment, event) {
     await logUnmatchedPayment(payment, event)
     return
   }
-  const r = await confirmPaidLead(phone, null, payment?.id || null, payment?.contact || null, payment?.amount || null)
+  const r = await confirmPaidLead(phone, null, payment?.id || null, payment?.contact || null, payment?.amount || null, payment?.email || null)
   // eslint-disable-next-line no-console
   console.log(`[webhook] captured ${payment?.id} → ${phone} (${matchedBy})${r ? '' : ' [no seat to claim]'}`)
 }
@@ -380,20 +385,20 @@ paymentRouter.get(
     if (!phone) return res.json({ paid: false })
 
     const { rows } = await query(
-      `SELECT paid, paid_at, slot_date, slot_time, slot_status, rzp_order_id FROM leads WHERE phone = $1`,
+      `SELECT paid, paid_at, slot_date, slot_time, slot_status, rzp_order_id,
+              name, email, rzp_payment_id FROM leads WHERE phone = $1`,
       [phone],
     )
     if (!rows.length) return res.json({ paid: false })
     const lead = rows[0]
 
-    // Paid + nothing newer pending = settled. We scope this to the CURRENT
-    // attempt so a previously-paid lead re-booking isn't reported done before
-    // their new money arrives: with an order id it must match the known order;
-    // with a `since` anchor (hosted link) the payment must be at/after it.
+    // Paid = settled. We scope this to the CURRENT attempt so a previously-paid
+    // lead re-booking isn't reported done before their new money arrives: with an
+    // order id it must match the known order; with a `since` anchor the payment
+    // must be at/after it. (No slot requirement — slotless bookings have no seat.)
     const paidAtEpoch = lead.paid_at ? Math.floor(new Date(lead.paid_at).getTime() / 1000) : 0
     const settled =
       lead.paid &&
-      lead.slot_status === 'confirmed' &&
       (orderId
         ? orderId === lead.rzp_order_id
         : since
@@ -404,6 +409,7 @@ paymentRouter.get(
         paid: true,
         date: lead.slot_date ? isoDate(lead.slot_date) : null,
         time: lead.slot_time,
+        name: lead.name, email: lead.email || null, mobile: phone, paymentId: lead.rzp_payment_id || null,
       })
     }
 
@@ -428,7 +434,16 @@ paymentRouter.get(
     }
     if (captured) {
       const r = await confirmPaidLead(phone, null, payId, payContact)
-      if (r) return res.json({ paid: true, date: r.date, time: r.time })
+      if (r) {
+        const { rows: fr } = await query(
+          `SELECT name, email, rzp_payment_id FROM leads WHERE phone = $1`, [phone],
+        )
+        const f = fr[0] || {}
+        return res.json({
+          paid: true, date: r.date, time: r.time,
+          name: f.name, email: f.email || null, mobile: phone, paymentId: f.rzp_payment_id || null,
+        })
+      }
       // captured but no slot on record — still surface the payment
       await query(
         `UPDATE leads SET paid = true, paid_at = now(),

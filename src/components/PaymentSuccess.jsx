@@ -21,6 +21,12 @@ const MAX_TRIES = 15 // ~30s before we fall back to the "confirming" message
 export default function PaymentSuccess() {
   const [status, setStatus] = useState('checking') // checking | success | pending | error
   const [info, setInfo] = useState({ date: null, time: null })
+  const [details, setDetails] = useState(() => {
+    const lead = getLead() || {}
+    const params = new URLSearchParams(window.location.search)
+    const phone = (params.get('phone') || lead.phone || '').replace(/\D/g, '')
+    return { name: lead.name || '', email: '', mobile: phone, paymentId: '' }
+  })
   const fired = useRef(false)
 
   useEffect(() => { document.title = 'Thank You — My Health School' }, [])
@@ -44,6 +50,12 @@ export default function PaymentSuccess() {
         if (!alive) return
         if (r?.paid) {
           setInfo({ date: r.date, time: r.time })
+          setDetails((d) => ({
+            name: r.name || d.name,
+            email: r.email || d.email,
+            mobile: r.mobile || d.mobile,
+            paymentId: r.paymentId || d.paymentId,
+          }))
           setStatus('success')
           if (!fired.current) {
             fired.current = true
@@ -83,6 +95,25 @@ export default function PaymentSuccess() {
               diabetes and reclaim your health.
             </p>
           </div>
+
+          <div className="ty-card">
+            <p className="ty-card-label">YOUR DETAILS</p>
+            <div className="ty-row"><span>Name</span><strong>{details.name || '—'}</strong></div>
+            <div className="ty-row"><span>Email</span><strong>{details.email || '—'}</strong></div>
+            <div className="ty-row"><span>Mobile</span><strong>{details.mobile ? `+91${details.mobile}` : '—'}</strong></div>
+          </div>
+
+          <div className="ty-card ty-card--support">
+            <p className="ty-card-label">OUR SUPPORT CONTACT</p>
+            <p className="ty-support-intro">In case you want to reach out to us, here are our support details:</p>
+            <div className="ty-row"><span>Email</span><strong>support@myhealthschool.in</strong></div>
+            <div className="ty-row"><span>Mobile</span><strong>+91-9952711053</strong></div>
+          </div>
+
+          {details.paymentId && (
+            <p className="ty-ref">Payment reference: <span className="ty-ref-id">{details.paymentId}</span></p>
+          )}
+          <a className="cta ty-home" href="/">Back to home</a>
         </div>
       </main>
     )
