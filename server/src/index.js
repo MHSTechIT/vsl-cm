@@ -7,7 +7,6 @@ import { paymentRouter, razorpayWebhook } from './routes/payment.js'
 import { adminRouter, staffLogin } from './routes/admin.js'
 import { watiWebhook } from './routes/watiWebhook.js'
 import { startHoldSweeper } from './lib/holds.js'
-import { startOneHourReminder } from './lib/reminders.js'
 import { ah } from './lib/ah.js'
 import { getSettings } from './lib/settings.js'
 import { parseFunnel } from './lib/funnel.js'
@@ -140,5 +139,5 @@ app.listen(config.port, () => {
   // eslint-disable-next-line no-console
   console.log(`✓ API on http://localhost:${config.port}  (razorpay: ${config.razorpay.mode})`)
   startHoldSweeper()
-  startOneHourReminder() // sends one_hour_togo ~1h before each paid booking
+  // 1-hour reminder removed — only the post-payment welcome video is sent.
 })

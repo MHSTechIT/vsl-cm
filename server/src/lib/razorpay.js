@@ -57,9 +57,10 @@ export async function capturePayment(paymentId, amountPaise, currency = 'INR') {
     body: JSON.stringify({ amount: amountPaise, currency }),
   })
   if (res.ok) return true
-  // already-captured payments return a specific error — treat as success
+  // A payment whose order is already settled returns one of these — the money
+  // IS captured, so treat it as success (lets the caller confirm the booking).
   const t = await res.text().catch(() => '')
-  if (/already been captured/i.test(t)) return true
+  if (/already been captured|order is already paid/i.test(t)) return true
   // eslint-disable-next-line no-console
   console.error(`[payment] capture failed for ${paymentId} (${res.status}): ${t.slice(0, 120)}`)
   return false
