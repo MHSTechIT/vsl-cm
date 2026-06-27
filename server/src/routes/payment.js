@@ -72,15 +72,21 @@ async function confirmPaidLead(phone, slotId = null, paymentId = null, paymentPh
   const payPhone = paymentPhone ? String(paymentPhone).replace(/\D/g, '') : null
   const amountRupees = (Number(amountPaise) || config.razorpay.pricePaise) / 100
 
-  // Log every distinct transaction so repeat payments are each recorded. Deduped
-  // by payment_id, so webhook retries / multiple confirm paths never double-log.
+  // Log every distinct transaction. Deduped by payment_id (ON CONFLICT), so a
+  // single payment's many webhook events / confirm paths record it ONCE.
+  // RETURNING tells us whether THIS call is the first to see this payment — we
+  // use that to send exactly ONE WhatsApp per payment, so repeat payments from
+  // the same number EACH get their own confirmation message.
+  let newPayment = false
   if (paymentId) {
-    await query(
+    const ins = await query(
       `INSERT INTO payments (payment_id, phone, name, amount, currency)
        VALUES ($1, $2, $3, $4, 'INR')
-       ON CONFLICT (payment_id) DO NOTHING`,
+       ON CONFLICT (payment_id) DO NOTHING
+       RETURNING payment_id`,
       [paymentId, phone, lead.name, amountRupees],
-    ).catch(() => {})
+    ).catch(() => null)
+    newPayment = Boolean(ins && ins.rowCount > 0)
   }
   // Mark THIS checkout's booking submission paid (matched by its order id), so
   // the Bookings list flips that one row from Unpaid → Paid.
@@ -104,10 +110,10 @@ async function confirmPaidLead(phone, slotId = null, paymentId = null, paymentPh
   // for an already-paid lead a webhook retry would silently eat extra seats.
   const seat = await claimSeat(phone, slotId, !lead.paid)
   if (!seat) {
-    // No seat to claim — either an already-settled retry, or a slotless booking
-    // (customer pays first, the team schedules later). Record the payment; only
-    // fire the welcome-video WhatsApp on the FIRST confirmation (retry-safe).
-    const firstConfirm = !lead.paid
+    // No seat to claim — either a retry, or a slotless booking (customer pays
+    // first, the team schedules later). Record the payment; fire the welcome-
+    // video WhatsApp once per NEW payment (so each repeat payment from the same
+    // number gets its own message; retries of the same payment do not).
     await query(
       `UPDATE leads
           SET paid = true, paid_at = COALESCE(paid_at, now()),
@@ -117,7 +123,7 @@ async function confirmPaidLead(phone, slotId = null, paymentId = null, paymentPh
         WHERE phone = $1`,
       [phone, paymentId, payPhone],
     )
-    if (firstConfirm) {
+    if (newPayment) {
       if (watiConfigured()) {
         watiPaymentSuccess(phone, { name: lead.name }).catch((e) =>
           // eslint-disable-next-line no-console
@@ -139,14 +145,17 @@ async function confirmPaidLead(phone, slotId = null, paymentId = null, paymentPh
       WHERE phone = $1`,
     [phone, paymentId, payPhone],
   )
-  // payment confirmation WhatsApp — WATI welcome-video template (name), else Whapi text
-  if (watiConfigured()) {
-    watiPaymentSuccess(phone, { name: lead.name }).catch((e) =>
-      // eslint-disable-next-line no-console
-      console.error('[wati] welcome video (payment success) failed:', e.message),
-    )
-  } else {
-    sendWhatsApp(phone, confirmationMessage(date, seat.slot_time), 'confirmation').catch(() => {})
+  // payment confirmation WhatsApp — once per NEW payment (welcome-video template,
+  // else Whapi text). Repeat payments from the same number each get a message.
+  if (newPayment) {
+    if (watiConfigured()) {
+      watiPaymentSuccess(phone, { name: lead.name }).catch((e) =>
+        // eslint-disable-next-line no-console
+        console.error('[wati] welcome video (payment success) failed:', e.message),
+      )
+    } else {
+      sendWhatsApp(phone, confirmationMessage(date, seat.slot_time), 'confirmation').catch(() => {})
+    }
   }
   // each paid booking may unlock fake-booked seats (scarcity drip)
   applySlotDrip(date).catch(() => {})
