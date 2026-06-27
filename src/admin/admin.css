@@ -491,6 +491,10 @@
 .adm-unmatched-tbl th { text-align: left; color: var(--crm-muted-strong); font-weight: 600; padding: 6px 10px; border-bottom: 1px solid var(--crm-line); }
 .adm-unmatched-tbl td { padding: 6px 10px; border-bottom: 1px solid var(--crm-line); color: var(--crm-deep); }
 
+/* Booking submission rows mixed into the Leads table */
+.adm-booking-row { background: rgba(124, 58, 237, 0.035); }
+.adm-booking-row .fnl-tag { background: #ede7fb; color: #5b21b6; }
+
 .adm-filterbar { display: flex; gap: 9px; margin-bottom: 14px; flex-wrap: wrap; }
 .adm-filterbar input, .adm-filterbar select, .adm-openslot input {
   font-family: inherit; font-size: 0.85rem; font-weight: 500;

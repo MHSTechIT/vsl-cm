@@ -676,12 +676,14 @@ function Leads() {
   const [deleting, setDeleting] = useState(false)
   const [unmatched, setUnmatched] = useState([]) // payments not tied to any lead
   const [showUnmatched, setShowUnmatched] = useState(false)
+  const [bookings, setBookings] = useState([]) // checkout submissions, shown inline as rows
   const load = useCallback(
     () => adminApi.leads(funnelFilter).then(setRows).catch(() => {}),
     [funnelFilter],
   )
   useEffect(() => { load() }, [load])
   useEffect(() => { adminApi.unmatchedPayments().then(setUnmatched).catch(() => {}) }, [])
+  useEffect(() => { adminApi.submissions().then((s) => setBookings(Array.isArray(s) ? s : [])).catch(() => {}) }, [])
 
   // Toggle a lead's "converted" flag — optimistic, reverts on failure.
   async function toggleConverted(phone, next) {
@@ -716,7 +718,32 @@ function Leads() {
   }
   const todayDay = localDay(Date.now())
 
-  const filtered = rows.filter((r) => {
+  // Booking submissions shown inline as their own rows (one per checkout, same
+  // number repeats). Mapped to a lead-shaped object with a _booking marker.
+  const bookingRows = (funnelFilter === 'free' ? [] : bookings).map((s) => ({
+    _booking: true,
+    _key: `b${s.id}`,
+    phone: s.phone,
+    name: s.name,
+    email: s.email,
+    amount: s.amount,
+    paid: Boolean(s.paid),
+    paid_at: s.paid_at,
+    created_at: s.created_at,
+    registered_at: s.created_at, // so the date filter/sort works
+    payment_status: s.paid ? 'success' : null,
+    watch_percent: null,
+    source: 'booking',
+    funnel: 'paid',
+  }))
+  // Merge with leads and sort by most recent activity (newest first).
+  const tsOf = (r) => {
+    const a = r._booking ? r.created_at : r.registered_at
+    return Math.max(a ? new Date(a).getTime() : 0, r.paid_at ? new Date(r.paid_at).getTime() : 0)
+  }
+  const allRows = [...rows, ...bookingRows].sort((x, y) => tsOf(y) - tsOf(x))
+
+  const filtered = allRows.filter((r) => {
     if (q && !`${r.name} ${r.phone}`.toLowerCase().includes(q.toLowerCase())) return false
     // registration-date filter
     if (dateMode === 'today' && (!r.registered_at || localDay(r.registered_at) !== todayDay)) return false
@@ -964,6 +991,30 @@ function Leads() {
           </thead>
           <tbody>
             {pageRows.map((r) => {
+              if (r._booking) {
+                return (
+                  <tr key={r._key} className="adm-booking-row">
+                    {selectMode && <td className="adm-check-col" />}
+                    <td className="adm-strong">
+                      <span className="fnl-tag fnl-tag--paid">Booking</span>
+                      {r.name || <span className="adm-dash">—</span>}
+                    </td>
+                    <td className="adm-mono">{r.phone}</td>
+                    <td><Pill c="grey">Booking</Pill></td>
+                    <td className="adm-mono">{r.phone}</td>
+                    <td><span className="adm-dash">—</span></td>
+                    <td><span className="adm-dash">—</span></td>
+                    <td><span className="adm-dash">—</span></td>
+                    <td><span className="adm-dash">—</span></td>
+                    <td><span className="adm-dash">—</span></td>
+                    <td><span className="adm-dash">—</span></td>
+                    <td>{r.created_at ? fmtDateTime(r.created_at) : <span className="adm-dash">—</span>}</td>
+                    <td>{r.paid_at ? fmtDateTime(r.paid_at) : <span className="adm-dash">—</span>}</td>
+                    <td>{r.paid ? <Pill c="green">Paid</Pill> : <Pill c="amber">Unpaid</Pill>}</td>
+                    <td><span className="adm-dash">—</span></td>
+                  </tr>
+                )
+              }
               const payStatus = r.payment_status || (r.paid ? 'success' : null)
               return (
               <tr key={r.phone} className={selectMode && selected.has(r.phone) ? 'is-selected' : ''}>
