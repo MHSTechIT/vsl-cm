@@ -36,7 +36,7 @@ export async function sweepOneHourReminders() {
 
     const dmy = String(l.slot_date).split('-').reverse().join('/') // YYYY-MM-DD → DD/MM/YYYY
     try {
-      await watiOneHour(l.phone, { date: dmy, time: l.slot_time })
+      await watiOneHour(l.phone, { name: l.name, date: dmy, time: l.slot_time })
       sent++
     } catch (e) {
       // Roll the flag back so the next tick retries this lead.

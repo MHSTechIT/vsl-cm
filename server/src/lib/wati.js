@@ -74,9 +74,9 @@ export async function sendSessionMessage(phone, text) {
 export const watiPaymentSuccess = (phone, { name } = {}) =>
   sendTemplate(phone, config.wati.templates.paymentSuccess, [String(name || '').trim() || 'there'])
 
-// 1-hour-before-slot reminder to the customer: {{1}} = date, {{2}} = time.
-export const watiOneHour = (phone, { date, time } = {}) =>
-  sendTemplate(phone, config.wati.templates.oneHour, [date, time])
+// 1-hour-before-slot reminder (one_hour_togo): {{1}} = name, {{2}} = date, {{3}} = time.
+export const watiOneHour = (phone, { name, date, time } = {}) =>
+  sendTemplate(phone, config.wati.templates.oneHour, [String(name || '').trim() || 'there', date, time])
 
 // Internal alert (lead finished the video) — ALWAYS to the fixed leadAlertPhone,
 // never the customer: {{1}} = lead name, {{2}} = lead phone.
