@@ -392,18 +392,16 @@ paymentRouter.get(
     if (!rows.length) return res.json({ paid: false })
     const lead = rows[0]
 
-    // Paid = settled. We scope this to the CURRENT attempt so a previously-paid
-    // lead re-booking isn't reported done before their new money arrives: with an
-    // order id it must match the known order; with a `since` anchor the payment
-    // must be at/after it. (No slot requirement — slotless bookings have no seat.)
+    // Fast-path "settled" must NEVER fire just because this lead paid BEFORE.
+    // The order row is created before payment, so an order-id match proves
+    // nothing — when an order id is given we always verify the real payment via
+    // Razorpay below (so the same number must actually pay again each time).
+    // Only confirm on the flag when there's no order to check AND, if a `since`
+    // anchor is present, the payment is at/after this attempt.
     const paidAtEpoch = lead.paid_at ? Math.floor(new Date(lead.paid_at).getTime() / 1000) : 0
     const settled =
-      lead.paid &&
-      (orderId
-        ? orderId === lead.rzp_order_id
-        : since
-          ? paidAtEpoch >= since
-          : true)
+      lead.paid && !orderId &&
+      (since ? paidAtEpoch >= since : true)
     if (settled) {
       return res.json({
         paid: true,
@@ -420,11 +418,12 @@ paymentRouter.get(
     let payId = null
     let payContact = null
     if (!captured) {
-      // Hosted-link reconcile: only a payment made during THIS attempt
-      // (created at/after `since`) and at least the expected price counts.
-      // Without `since` we skip this fallback entirely rather than risk
-      // matching a stale payment.
-      if (since) {
+      // Hosted-link reconcile ONLY (no order id anywhere to verify against):
+      // match a recent captured payment for this attempt. When we DO have an
+      // order (the in-page popup always does), we rely solely on that order
+      // above — so a recent prior payment from the same number can't confirm a
+      // new, unpaid attempt.
+      if (since && !orderId && !lead.rzp_order_id) {
         const recent = await recentCapturedPaymentForPhone(phone, {
           sinceEpoch: since,
           minAmountPaise: config.razorpay.pricePaise,
