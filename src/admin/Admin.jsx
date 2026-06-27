@@ -41,6 +41,7 @@ const Icon = {
   users: <path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5zm0 2c-3.33 0-10 1.67-10 5v3h20v-3c0-3.33-6.67-5-10-5z" />,
   wati: <path d="M12 3C6.5 3 2 6.9 2 11.7c0 2.5 1.2 4.7 3.2 6.3L4 22l4.3-1.5c1.1.3 2.4.5 3.7.5 5.5 0 10-3.9 10-8.8S17.5 3 12 3z" />,
   payments: <path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm0 4H4V6h16v2zm0 4v6H4v-6h16zM6 15h6v2H6v-2z" />,
+  bookings: <path d="M19 3h-1V1h-2v2H8V1H6v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 16H5V9h14v10zM7 11h5v5H7v-5z" />,
 }
 const NavIcon = ({ name }) => (
   <svg className="adm-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -2373,6 +2374,67 @@ function Settings() {
 }
 
 // ---------- Shell ----------
+// ---------- Bookings log (one row per checkout/submission; same number repeats) ----------
+function Bookings() {
+  const [rows, setRows] = useState([])
+  const [q, setQ] = useState('')
+  const [filter, setFilter] = useState('all') // all | paid | unpaid
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    adminApi.submissions()
+      .then((r) => { setRows(Array.isArray(r) ? r : []); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [])
+  const filtered = rows.filter((r) => {
+    if (filter === 'paid' && !r.paid) return false
+    if (filter === 'unpaid' && r.paid) return false
+    if (q && !`${r.name || ''} ${r.phone || ''} ${r.email || ''}`.toLowerCase().includes(q.toLowerCase())) return false
+    return true
+  })
+  const paid = rows.filter((r) => r.paid).length
+  return (
+    <section className="adm-panel">
+      <div className="adm-panel-head">
+        <div>
+          <h1 className="adm-h1">Bookings</h1>
+          <p className="adm-sub"><b>{rows.length}</b> submissions · {paid} paid · {rows.length - paid} unpaid</p>
+        </div>
+      </div>
+      <div className="adm-filterbar">
+        <input placeholder="Search name, phone or email" value={q} onChange={(e) => setQ(e.target.value)} />
+        <Dropdown value={filter} onChange={setFilter} options={[
+          { value: 'all', label: 'All bookings' },
+          { value: 'paid', label: 'Paid' },
+          { value: 'unpaid', label: 'Unpaid' },
+        ]} />
+      </div>
+      <div className="adm-table-wrap">
+        <table className="adm-table">
+          <thead>
+            <tr><th>Date &amp; time</th><th>Name</th><th>Phone</th><th>Email</th><th>Amount</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={6}><span className="caption">Loading…</span></td></tr>
+            ) : filtered.length === 0 ? (
+              <tr><td colSpan={6}><span className="caption">No bookings yet. Every form submission that reaches Razorpay appears here — the same number repeats as a new row.</span></td></tr>
+            ) : filtered.map((r) => (
+              <tr key={r.id}>
+                <td>{r.created_at ? fmtDateTime(r.created_at) : <span className="adm-dash">—</span>}</td>
+                <td className="adm-strong">{r.name || <span className="adm-dash">—</span>}</td>
+                <td className="adm-mono">{r.phone || <span className="adm-dash">—</span>}</td>
+                <td>{r.email || <span className="adm-dash">—</span>}</td>
+                <td>{r.amount != null ? `₹${Number(r.amount).toLocaleString('en-IN')}` : <span className="adm-dash">—</span>}</td>
+                <td>{r.paid ? <Pill c="green">Paid</Pill> : <Pill c="amber">Unpaid</Pill>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
 // ---------- Payments log (every transaction; repeat payments are separate rows) ----------
 function Payments() {
   const [rows, setRows] = useState([])
@@ -2427,6 +2489,7 @@ function Payments() {
 const ADMIN_NAV = [
   { id: 'dashboard', label: 'Overview' },
   { id: 'leads', label: 'Leads' },
+  { id: 'bookings', label: 'Bookings' },
   { id: 'payments', label: 'Payments' },
   { id: 'users', label: 'Users' },
   { id: 'wati', label: 'WATI' },
@@ -2500,6 +2563,7 @@ export default function Admin() {
       <main className="adm-content" key={funnel}>
         {tab === 'dashboard' && role === 'admin' && <Dashboard />}
         {tab === 'leads' && <Leads />}
+        {tab === 'bookings' && role === 'admin' && <Bookings />}
         {tab === 'payments' && role === 'admin' && <Payments />}
         {tab === 'users' && role === 'admin' && <Users />}
         {tab === 'wati' && <WatiChat />}

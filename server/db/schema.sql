@@ -207,6 +207,25 @@ CREATE TABLE IF NOT EXISTS payments (
 CREATE INDEX IF NOT EXISTS idx_payments_created ON payments (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_payments_phone ON payments (phone);
 
+-- Booking submissions: ONE row per checkout (each time someone fills the form
+-- and reaches Razorpay). Same number that submits/pays again = a NEW row, so
+-- abandoned (unpaid) and repeat bookings are all tracked separately. The leads
+-- table stays one-row-per-person; this is the per-submission record.
+CREATE TABLE IF NOT EXISTS submissions (
+  id             SERIAL PRIMARY KEY,
+  phone          TEXT,
+  name           TEXT,
+  email          TEXT,
+  rzp_order_id   TEXT,
+  rzp_payment_id TEXT,
+  amount         NUMERIC,
+  paid           BOOLEAN NOT NULL DEFAULT false,
+  paid_at        TIMESTAMPTZ,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_submissions_created ON submissions (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_submissions_order ON submissions (rzp_order_id);
+
 CREATE INDEX IF NOT EXISTS idx_slots_date ON slots (slot_date);
 CREATE INDEX IF NOT EXISTS idx_slots_status ON slots (status);
 CREATE INDEX IF NOT EXISTS idx_leads_paid ON leads (paid);

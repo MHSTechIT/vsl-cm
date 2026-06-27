@@ -62,7 +62,7 @@ async function claimSeat(phone, slotId, takeAvailableIfReleased) {
 // reconciliation). Safe to call repeatedly (webhook retries): a seat is only
 // claimed while one is pending-held. A lead who already paid before can book
 // again with the same phone — their newly held seat still gets confirmed.
-async function confirmPaidLead(phone, slotId = null, paymentId = null, paymentPhone = null, amountPaise = null, email = null) {
+async function confirmPaidLead(phone, slotId = null, paymentId = null, paymentPhone = null, amountPaise = null, email = null, orderId = null) {
   const { rows: leadRows } = await query(
     `SELECT paid, name, slot_date, slot_time FROM leads WHERE phone = $1`,
     [phone],
@@ -70,6 +70,7 @@ async function confirmPaidLead(phone, slotId = null, paymentId = null, paymentPh
   if (!leadRows.length) return null
   const lead = leadRows[0]
   const payPhone = paymentPhone ? String(paymentPhone).replace(/\D/g, '') : null
+  const amountRupees = (Number(amountPaise) || config.razorpay.pricePaise) / 100
 
   // Log every distinct transaction so repeat payments are each recorded. Deduped
   // by payment_id, so webhook retries / multiple confirm paths never double-log.
@@ -78,7 +79,19 @@ async function confirmPaidLead(phone, slotId = null, paymentId = null, paymentPh
       `INSERT INTO payments (payment_id, phone, name, amount, currency)
        VALUES ($1, $2, $3, $4, 'INR')
        ON CONFLICT (payment_id) DO NOTHING`,
-      [paymentId, phone, lead.name, (Number(amountPaise) || config.razorpay.pricePaise) / 100],
+      [paymentId, phone, lead.name, amountRupees],
+    ).catch(() => {})
+  }
+  // Mark THIS checkout's booking submission paid (matched by its order id), so
+  // the Bookings list flips that one row from Unpaid → Paid.
+  if (orderId) {
+    await query(
+      `UPDATE submissions
+          SET paid = true, paid_at = COALESCE(paid_at, now()),
+              rzp_payment_id = COALESCE(rzp_payment_id, $2),
+              amount = COALESCE(amount, $3), email = COALESCE(email, $4)
+        WHERE rzp_order_id = $1`,
+      [orderId, paymentId, amountRupees, email ? String(email) : null],
     ).catch(() => {})
   }
   // Capture the email the payer entered in Razorpay (we don't collect it on the
@@ -198,7 +211,7 @@ async function handlePaymentCaptured(payment, event) {
     await logUnmatchedPayment(payment, event)
     return
   }
-  const r = await confirmPaidLead(phone, null, payment?.id || null, payment?.contact || null, payment?.amount || null, payment?.email || null)
+  const r = await confirmPaidLead(phone, null, payment?.id || null, payment?.contact || null, payment?.amount || null, payment?.email || null, payment?.order_id || order?.id || null)
   // eslint-disable-next-line no-console
   console.log(`[webhook] captured ${payment?.id} → ${phone} (${matchedBy})${r ? '' : ' [no seat to claim]'}`)
 }
@@ -341,6 +354,14 @@ paymentRouter.post(
         phone,
         order.orderId,
       ])
+      // Log this checkout as a NEW booking submission (one row per attempt, even
+      // for the same number). Starts unpaid; marked paid only if payment lands.
+      // So "reached Razorpay and went back" stays here as an unpaid booking.
+      const { rows: lr } = await query(`SELECT name FROM leads WHERE phone = $1`, [phone])
+      await query(
+        `INSERT INTO submissions (phone, name, rzp_order_id) VALUES ($1, $2, $3)`,
+        [phone, lr[0]?.name || null, order.orderId],
+      ).catch(() => {})
       res.json(order)
     } catch (e) {
       // eslint-disable-next-line no-console
@@ -363,7 +384,7 @@ paymentRouter.post(
     if (!valid) return res.status(400).json({ error: 'payment verification failed' })
 
     // popup path: the payer's contact is the number they registered with
-    const r = await confirmPaidLead(phone, slotId, paymentId || null, phone)
+    const r = await confirmPaidLead(phone, slotId, paymentId || null, phone, null, null, orderId || null)
     if (!r) return res.status(409).json({ error: 'could not confirm payment — please try again' })
     res.json({ ok: true, date: r.date, time: r.time })
   }),
@@ -432,7 +453,7 @@ paymentRouter.get(
       }
     }
     if (captured) {
-      const r = await confirmPaidLead(phone, null, payId, payContact)
+      const r = await confirmPaidLead(phone, null, payId, payContact, null, null, orderId || lead.rzp_order_id || null)
       if (r) {
         const { rows: fr } = await query(
           `SELECT name, email, rzp_payment_id FROM leads WHERE phone = $1`, [phone],

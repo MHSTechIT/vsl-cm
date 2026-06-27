@@ -197,6 +197,21 @@ adminRouter.get(
   }),
 )
 
+// Bookings log — one row per checkout/submission (same number can repeat).
+// Each is Paid or Unpaid (reached Razorpay but didn't pay). Newest first.
+adminRouter.get(
+  '/submissions',
+  ah(async (_req, res) => {
+    const { rows } = await query(
+      `SELECT id, phone, name, email, amount, paid, paid_at, created_at, rzp_payment_id
+         FROM submissions
+        ORDER BY created_at DESC
+        LIMIT 2000`,
+    )
+    res.json(rows)
+  }),
+)
+
 // Unmatched payments — captured money we couldn't tie to a lead. Ops reviews
 // these; > 0 rows means someone paid but isn't booked.
 adminRouter.get(
