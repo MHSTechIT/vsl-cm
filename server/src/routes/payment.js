@@ -99,12 +99,11 @@ async function confirmPaidLead(phone, slotId = null, paymentId = null, paymentPh
       WHERE phone = $1`,
     [phone, paymentId, payPhone],
   )
-  // payment confirmation WhatsApp — WATI "vsl" template (date + time), else Whapi text
+  // payment confirmation WhatsApp — WATI welcome-video template (name), else Whapi text
   if (watiConfigured()) {
-    const dmy = date.split('-').reverse().join('/') // YYYY-MM-DD → DD/MM/YYYY
-    watiPaymentSuccess(phone, { date: dmy, time: seat.slot_time }).catch((e) =>
+    watiPaymentSuccess(phone, { name: lead.name }).catch((e) =>
       // eslint-disable-next-line no-console
-      console.error('[wati] vsl (payment success) failed:', e.message),
+      console.error('[wati] welcome video (payment success) failed:', e.message),
     )
   } else {
     sendWhatsApp(phone, confirmationMessage(date, seat.slot_time), 'confirmation').catch(() => {})

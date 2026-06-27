@@ -584,8 +584,7 @@ adminRouter.post(
     )
     // Booking-confirmation WhatsApp (same path as a real payment).
     if (watiConfigured()) {
-      const dmy = date.split('-').reverse().join('/') // YYYY-MM-DD → DD/MM/YYYY
-      watiPaymentSuccess(phone, { date: dmy, time }).catch((e) =>
+      watiPaymentSuccess(phone, { name: leadRows.rows[0].name }).catch((e) =>
         // eslint-disable-next-line no-console
         console.error('[wati] manual booking confirm failed:', e.message),
       )

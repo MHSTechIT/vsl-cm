@@ -55,8 +55,8 @@ export const config = {
     baseUrl: process.env.WATI_BASE_URL || '',
     webhookToken: process.env.WATI_WEBHOOK_TOKEN || '',
     templates: {
-      // booking confirmation, sent on payment success (date + time vars)
-      paymentSuccess: process.env.WATI_TPL_PAYMENT_SUCCESS || 'appoinment_immediate',
+      // booking confirmation, sent on payment success (mhs_welcome_video: name var)
+      paymentSuccess: process.env.WATI_TPL_PAYMENT_SUCCESS || 'mhs_welcome_video',
       // reminder sent 1 hour before the booked slot (date + time vars)
       oneHour: process.env.WATI_TPL_ONE_HOUR || 'one_hour_togo',
       // internal alert when a lead finishes the video (name + phone vars)

@@ -242,10 +242,10 @@ slotsRouter.post(
       [phone, date, time],
     )
 
-    // Booking-confirmation WhatsApp (same templates as a paid booking).
+    // Booking-confirmation WhatsApp (same template as a paid booking).
     if (watiConfigured()) {
-      const dmy = date.split('-').reverse().join('/') // YYYY-MM-DD → DD/MM/YYYY
-      watiPaymentSuccess(phone, { date: dmy, time }).catch(() => {})
+      const { rows: lr } = await query(`SELECT name FROM leads WHERE phone = $1`, [phone])
+      watiPaymentSuccess(phone, { name: lr[0]?.name }).catch(() => {})
     } else {
       sendWhatsApp(phone, confirmationMessage(date, time), 'confirmation').catch(() => {})
     }

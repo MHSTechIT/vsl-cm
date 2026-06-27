@@ -68,9 +68,11 @@ export async function sendSessionMessage(phone, text) {
   return { sent: true }
 }
 
-// Payment-success / booking-confirmation template: {{1}} = date, {{2}} = time.
-export const watiPaymentSuccess = (phone, { date, time } = {}) =>
-  sendTemplate(phone, config.wati.templates.paymentSuccess, [date, time])
+// Payment-success / booking-confirmation template (mhs_welcome_video):
+// {{1}} = customer name. Falls back to a neutral greeting so WATI never gets a
+// blank variable (which it rejects with a 400).
+export const watiPaymentSuccess = (phone, { name } = {}) =>
+  sendTemplate(phone, config.wati.templates.paymentSuccess, [String(name || '').trim() || 'there'])
 
 // 1-hour-before-slot reminder to the customer: {{1}} = date, {{2}} = time.
 export const watiOneHour = (phone, { date, time } = {}) =>
