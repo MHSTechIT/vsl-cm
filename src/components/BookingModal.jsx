@@ -98,9 +98,8 @@ export default function BookingModal({ onClose }) {
   const payingPhone = useRef('')
   const attemptSince = useRef(0) // epoch secs when this pay attempt began
 
-  // load available dates + config (payment link) on open
+  // load config (payment link) on open
   useEffect(() => {
-    api.slotDates().then(setDates).catch(() => setErr('Could not load dates.'))
     api.config().then((c) => setPaymentLink(c?.paymentLink || null)).catch(() => {})
     return () => {
       clearInterval(holdTimer.current)
@@ -198,10 +197,6 @@ export default function BookingModal({ onClose }) {
       setErr('Please enter your real WhatsApp number.')
       return
     }
-    if (!date || !time) {
-      setErr('Please pick a date and time.')
-      return
-    }
 
     // Anchor this attempt in time: the backend only confirms payments made
     // at/after this instant, so a stale/earlier payment can't false-confirm.
@@ -214,14 +209,12 @@ export default function BookingModal({ onClose }) {
 
     setStatus('paying')
     try {
-      // ensure the lead exists (Form 2 may be the first touch for warm traffic)
+      // ensure the lead exists, then go straight to payment — no slot is chosen
+      // here; the team schedules the consultation after payment.
       const { phone: saved } = await api.register(cleanName, local)
       saveLead({ name: cleanName, phone: saved })
 
-      // claim one seat for this time (the backend returns the seat id)
-      const hold = await api.holdSlot(saved, cleanName, date, time)
-      const slotId = hold.slotId
-      startHoldCountdown(hold.holdExpiresAt)
+      const slotId = null // slotless booking — confirmed without a seat hold
 
       // ── FREE funnel ───────────────────────────────────────────────────────
       // No payment — confirm the held seat directly and show the success card.
@@ -350,12 +343,15 @@ export default function BookingModal({ onClose }) {
         {status === 'done' ? (
           <div className="booking-done">
             <div className="booking-tick" aria-hidden="true">✓</div>
-            <h3>{isFree ? 'Slot confirmed' : 'Payment successful — slot confirmed'}</h3>
+            <h3>{isFree ? 'You’re registered' : 'Payment successful'}</h3>
             <p>
-              Your {isFree ? 'masterclass' : 'health assessment'} is booked for{' '}
-              <strong>{fmtDate(confirmed.date)}</strong> at <strong>{confirmed.time}</strong>.
+              Thank you{name.trim() ? `, ${name.trim()}` : ''}! Your 1:1 consultation
+              is confirmed.
             </p>
-            <p className="caption">Our team will call you. A confirmation has been sent on WhatsApp.</p>
+            <p className="caption">
+              Our team will contact you on WhatsApp shortly to schedule your consultation
+              at a convenient time.
+            </p>
             <button className="cta" onClick={onClose}>Done</button>
           </div>
         ) : status === 'failed' ? (
@@ -374,7 +370,7 @@ export default function BookingModal({ onClose }) {
         ) : (
           <>
             <h3 className="modal-title">
-              {isFree ? 'Book your free masterclass slot' : 'Book your ₹50 health assessment'}
+              {isFree ? 'Book your free masterclass slot' : 'Book your 1:1 consultation'}
             </h3>
 
             <input
@@ -395,47 +391,11 @@ export default function BookingModal({ onClose }) {
               onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
             />
 
-            <p className="modal-label">Select a date</p>
-            {dates.length === 0 ? (
-              <p className="caption">No dates open right now.</p>
-            ) : (
-              <SlotCalendar
-                availableDates={dates.map((d) => d.date)}
-                selected={date}
-                onPick={pickDate}
-              />
-            )}
+            <p className="caption modal-note">
+              Enter your details and continue to payment. Our team will contact you
+              on WhatsApp to schedule your consultation.
+            </p>
 
-            {date && (
-              <>
-                <p className="modal-label">Select a time — {fmtDate(date)}</p>
-                <div className="bk-slots">
-                  {times.length === 0 && <span className="caption">Loading times…</span>}
-                  {times.map((t) => {
-                    const full = t.left <= 0
-                    return (
-                      <button
-                        key={t.time}
-                        type="button"
-                        disabled={full}
-                        className={`bk-slot ${full ? 'is-booked' : ''} ${time === t.time ? 'is-sel' : ''}`}
-                        onClick={() => setTime(t.time)}
-                      >
-                        <span className="bk-slot-time">{t.time}</span>
-                        <span className="bk-slot-sub">{full ? 'Booked' : 'Available'}</span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </>
-            )}
-
-            {secsLeft > 0 && status === 'paying' && (
-              <p className="caption hold-note">
-                Slot held — complete payment within {Math.floor(secsLeft / 60)}:
-                {String(secsLeft % 60).padStart(2, '0')}
-              </p>
-            )}
             {err && <p className="reg-error">{err}</p>}
 
             {status === 'paying' && paymentLink ? (
@@ -457,9 +417,9 @@ export default function BookingModal({ onClose }) {
               <button
                 className="cta"
                 onClick={confirmAndPay}
-                disabled={!time || status === 'paying'}
+                disabled={!name.trim() || phone.length < 10 || status === 'paying'}
               >
-                {status === 'paying' ? 'Processing…' : isFree ? 'Book My Free Slot' : 'Book My Appointment'}
+                {status === 'paying' ? 'Processing…' : isFree ? 'Book My Free Slot' : 'Continue to Payment'}
               </button>
             )}
           </>

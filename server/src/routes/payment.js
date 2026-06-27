@@ -75,18 +75,29 @@ async function confirmPaidLead(phone, slotId = null, paymentId = null, paymentPh
   // for an already-paid lead a webhook retry would silently eat extra seats.
   const seat = await claimSeat(phone, slotId, !lead.paid)
   if (!seat) {
-    if (lead.paid) {
-      // already settled — still record ids if we just learned them
-      await query(
-        `UPDATE leads SET rzp_payment_id = COALESCE($2, rzp_payment_id),
-            payment_phone = COALESCE($3, payment_phone),
-            payment_status = 'success', updated_at = now()
-          WHERE phone = $1`,
-        [phone, paymentId, payPhone],
-      )
-      return { date: lead.slot_date ? isoDate(lead.slot_date) : null, time: lead.slot_time }
+    // No seat to claim — either an already-settled retry, or a slotless booking
+    // (customer pays first, the team schedules later). Record the payment; only
+    // fire the welcome-video WhatsApp on the FIRST confirmation (retry-safe).
+    const firstConfirm = !lead.paid
+    await query(
+      `UPDATE leads
+          SET paid = true, paid_at = COALESCE(paid_at, now()),
+              rzp_payment_id = COALESCE($2, rzp_payment_id),
+              payment_phone = COALESCE($3, payment_phone),
+              payment_status = 'success', wa_payment = 'success', updated_at = now()
+        WHERE phone = $1`,
+      [phone, paymentId, payPhone],
+    )
+    if (firstConfirm) {
+      if (watiConfigured()) {
+        watiPaymentSuccess(phone, { name: lead.name }).catch((e) =>
+          // eslint-disable-next-line no-console
+          console.error('[wati] welcome video (payment success) failed:', e.message),
+        )
+      }
+      syncLeadsToSheetSafe()
     }
-    return null
+    return { date: lead.slot_date ? isoDate(lead.slot_date) : null, time: lead.slot_time || null }
   }
 
   const date = isoDate(seat.slot_date)
@@ -328,16 +339,16 @@ paymentRouter.post(
   '/verify',
   ah(async (req, res) => {
     const phone = String(req.body?.phone || '').replace(/\D/g, '')
-    const slotId = Number(req.body?.slotId)
+    const slotId = req.body?.slotId ? Number(req.body.slotId) : null
     const { orderId, paymentId, signature } = req.body || {}
-    if (!phone || !slotId) return res.status(400).json({ error: 'phone and slotId required' })
+    if (!phone) return res.status(400).json({ error: 'phone required' })
 
     const valid = isMock() ? true : verifyPayment({ orderId, paymentId, signature })
     if (!valid) return res.status(400).json({ error: 'payment verification failed' })
 
     // popup path: the payer's contact is the number they registered with
     const r = await confirmPaidLead(phone, slotId, paymentId || null, phone)
-    if (!r) return res.status(409).json({ error: 'hold expired — please pick a slot again' })
+    if (!r) return res.status(409).json({ error: 'could not confirm payment — please try again' })
     res.json({ ok: true, date: r.date, time: r.time })
   }),
 )
