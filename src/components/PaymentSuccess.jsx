@@ -110,9 +110,6 @@ export default function PaymentSuccess() {
             <div className="ty-row"><span>Mobile</span><strong>+91-9952711053</strong></div>
           </div>
 
-          {details.paymentId && (
-            <p className="ty-ref">Payment reference: <span className="ty-ref-id">{details.paymentId}</span></p>
-          )}
           <a className="cta ty-home" href="/">Back to home</a>
         </div>
       </main>
