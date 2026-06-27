@@ -190,6 +190,22 @@ CREATE TABLE IF NOT EXISTS unmatched_payments (
   resolved_at     TIMESTAMPTZ
 );
 
+-- Payments log: one row per confirmed transaction. A customer who pays twice
+-- gets two rows (deduped only by the unique Razorpay payment_id). The leads
+-- table stays one-row-per-person; this is the per-transaction record.
+CREATE TABLE IF NOT EXISTS payments (
+  id              SERIAL PRIMARY KEY,
+  payment_id      TEXT NOT NULL UNIQUE,
+  order_id        TEXT,
+  phone           TEXT,
+  name            TEXT,
+  amount          NUMERIC NOT NULL DEFAULT 0,
+  currency        TEXT NOT NULL DEFAULT 'INR',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_payments_created ON payments (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_payments_phone ON payments (phone);
+
 CREATE INDEX IF NOT EXISTS idx_slots_date ON slots (slot_date);
 CREATE INDEX IF NOT EXISTS idx_slots_status ON slots (status);
 CREATE INDEX IF NOT EXISTS idx_leads_paid ON leads (paid);

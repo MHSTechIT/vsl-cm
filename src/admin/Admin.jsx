@@ -40,6 +40,7 @@ const Icon = {
   upload: <path d="M11 16V7.8L8.4 10.4 7 9l5-5 5 5-1.4 1.4L13 7.8V16h-2zM5 18h14v2H5v-2z" />,
   users: <path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5zm0 2c-3.33 0-10 1.67-10 5v3h20v-3c0-3.33-6.67-5-10-5z" />,
   wati: <path d="M12 3C6.5 3 2 6.9 2 11.7c0 2.5 1.2 4.7 3.2 6.3L4 22l4.3-1.5c1.1.3 2.4.5 3.7.5 5.5 0 10-3.9 10-8.8S17.5 3 12 3z" />,
+  payments: <path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm0 4H4V6h16v2zm0 4v6H4v-6h16zM6 15h6v2H6v-2z" />,
 }
 const NavIcon = ({ name }) => (
   <svg className="adm-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -2372,9 +2373,61 @@ function Settings() {
 }
 
 // ---------- Shell ----------
+// ---------- Payments log (every transaction; repeat payments are separate rows) ----------
+function Payments() {
+  const [rows, setRows] = useState([])
+  const [q, setQ] = useState('')
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    adminApi.payments()
+      .then((r) => { setRows(Array.isArray(r) ? r : []); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [])
+  const filtered = rows.filter((r) =>
+    !q || `${r.name || ''} ${r.phone || ''} ${r.payment_id || ''}`.toLowerCase().includes(q.toLowerCase()),
+  )
+  const total = filtered.reduce((s, r) => s + Number(r.amount || 0), 0)
+  return (
+    <section className="adm-panel">
+      <div className="adm-panel-head">
+        <div>
+          <h1 className="adm-h1">Payments</h1>
+          <p className="adm-sub"><b>{rows.length}</b> payments · ₹{total.toLocaleString('en-IN')} collected</p>
+        </div>
+      </div>
+      <div className="adm-filterbar">
+        <input placeholder="Search name, phone or payment id" value={q} onChange={(e) => setQ(e.target.value)} />
+      </div>
+      <div className="adm-table-wrap">
+        <table className="adm-table">
+          <thead>
+            <tr><th>Date &amp; time</th><th>Name</th><th>Phone</th><th>Amount</th><th>Payment ID</th></tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={5}><span className="caption">Loading…</span></td></tr>
+            ) : filtered.length === 0 ? (
+              <tr><td colSpan={5}><span className="caption">No payments recorded yet. Every new payment appears here — a repeat payment from the same number shows as its own row.</span></td></tr>
+            ) : filtered.map((r) => (
+              <tr key={r.payment_id}>
+                <td>{r.created_at ? fmtDateTime(r.created_at) : <span className="adm-dash">—</span>}</td>
+                <td className="adm-strong">{r.name || <span className="adm-dash">—</span>}</td>
+                <td className="adm-mono">{r.phone || <span className="adm-dash">—</span>}</td>
+                <td>₹{Number(r.amount || 0).toLocaleString('en-IN')}</td>
+                <td className="adm-mono">{r.payment_id}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
 const ADMIN_NAV = [
   { id: 'dashboard', label: 'Overview' },
   { id: 'leads', label: 'Leads' },
+  { id: 'payments', label: 'Payments' },
   { id: 'users', label: 'Users' },
   { id: 'wati', label: 'WATI' },
   { id: 'slots', label: 'Slots' },
@@ -2447,6 +2500,7 @@ export default function Admin() {
       <main className="adm-content" key={funnel}>
         {tab === 'dashboard' && role === 'admin' && <Dashboard />}
         {tab === 'leads' && <Leads />}
+        {tab === 'payments' && role === 'admin' && <Payments />}
         {tab === 'users' && role === 'admin' && <Users />}
         {tab === 'wati' && <WatiChat />}
         {tab === 'slots' && role === 'admin' && <Slots funnel={funnel} onFunnel={switchFunnel} />}

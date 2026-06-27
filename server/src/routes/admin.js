@@ -161,23 +161,6 @@ adminRouter.get(
   }),
 )
 
-// Payments Razorpay confirmed but that couldn't be tied to any lead (e.g. paid
-// via an old hosted link with a phone that doesn't match a registration). Shown
-// in the Leads report so they can be reconciled. Newest first.
-adminRouter.get(
-  '/unmatched-payments',
-  ah(async (_req, res) => {
-    const { rows } = await query(
-      `SELECT payment_id, order_id, amount, currency, payer_phone, payer_email,
-              received_at, resolved
-         FROM unmatched_payments
-        WHERE resolved = false
-        ORDER BY received_at DESC`,
-    )
-    res.json(rows)
-  }),
-)
-
 // Bulk-delete leads by phone. Frees any seats they hold/own (back to available)
 // so capacity isn't lost, then removes the lead rows.
 adminRouter.post(
@@ -196,6 +179,21 @@ adminRouter.post(
     )
     const { rowCount } = await query(`DELETE FROM leads WHERE phone = ANY($1)`, [phones])
     res.json({ ok: true, deleted: rowCount })
+  }),
+)
+
+// Payments log — every confirmed transaction (repeat payments from the same
+// phone are separate rows). Newest first.
+adminRouter.get(
+  '/payments',
+  ah(async (_req, res) => {
+    const { rows } = await query(
+      `SELECT payment_id, order_id, phone, name, amount, currency, created_at
+         FROM payments
+        ORDER BY created_at DESC
+        LIMIT 2000`,
+    )
+    res.json(rows)
   }),
 )
 

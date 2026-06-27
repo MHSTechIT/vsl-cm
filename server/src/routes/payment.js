@@ -62,7 +62,7 @@ async function claimSeat(phone, slotId, takeAvailableIfReleased) {
 // reconciliation). Safe to call repeatedly (webhook retries): a seat is only
 // claimed while one is pending-held. A lead who already paid before can book
 // again with the same phone — their newly held seat still gets confirmed.
-async function confirmPaidLead(phone, slotId = null, paymentId = null, paymentPhone = null) {
+async function confirmPaidLead(phone, slotId = null, paymentId = null, paymentPhone = null, amountPaise = null) {
   const { rows: leadRows } = await query(
     `SELECT paid, name, slot_date, slot_time FROM leads WHERE phone = $1`,
     [phone],
@@ -70,6 +70,17 @@ async function confirmPaidLead(phone, slotId = null, paymentId = null, paymentPh
   if (!leadRows.length) return null
   const lead = leadRows[0]
   const payPhone = paymentPhone ? String(paymentPhone).replace(/\D/g, '') : null
+
+  // Log every distinct transaction so repeat payments are each recorded. Deduped
+  // by payment_id, so webhook retries / multiple confirm paths never double-log.
+  if (paymentId) {
+    await query(
+      `INSERT INTO payments (payment_id, phone, name, amount, currency)
+       VALUES ($1, $2, $3, $4, 'INR')
+       ON CONFLICT (payment_id) DO NOTHING`,
+      [paymentId, phone, lead.name, (Number(amountPaise) || config.razorpay.pricePaise) / 100],
+    ).catch(() => {})
+  }
 
   // Falling back to an 'available' seat is only safe for a first payment —
   // for an already-paid lead a webhook retry would silently eat extra seats.
@@ -182,7 +193,7 @@ async function handlePaymentCaptured(payment, event) {
     await logUnmatchedPayment(payment, event)
     return
   }
-  const r = await confirmPaidLead(phone, null, payment?.id || null, payment?.contact || null)
+  const r = await confirmPaidLead(phone, null, payment?.id || null, payment?.contact || null, payment?.amount || null)
   // eslint-disable-next-line no-console
   console.log(`[webhook] captured ${payment?.id} → ${phone} (${matchedBy})${r ? '' : ' [no seat to claim]'}`)
 }
