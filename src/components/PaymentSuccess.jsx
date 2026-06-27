@@ -99,7 +99,6 @@ export default function PaymentSuccess() {
           <div className="ty-card">
             <p className="ty-card-label">YOUR DETAILS</p>
             <div className="ty-row"><span>Name</span><strong>{details.name || '—'}</strong></div>
-            <div className="ty-row"><span>Email</span><strong>{details.email || '—'}</strong></div>
             <div className="ty-row"><span>Mobile</span><strong>{details.mobile ? `+91${details.mobile}` : '—'}</strong></div>
           </div>
 
