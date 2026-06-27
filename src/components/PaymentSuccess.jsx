@@ -23,6 +23,8 @@ export default function PaymentSuccess() {
   const [info, setInfo] = useState({ date: null, time: null })
   const fired = useRef(false)
 
+  useEffect(() => { document.title = 'Thank You — My Health School' }, [])
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const phone = (params.get('phone') || getLead()?.phone || '').replace(/\D/g, '')
@@ -58,6 +60,34 @@ export default function PaymentSuccess() {
     return () => { alive = false; if (timer) clearTimeout(timer) }
   }, [])
 
+  // Confirmed payment → full-page Thank You (matches the brand confirmation page).
+  if (status === 'success') {
+    return (
+      <main className="ty-page">
+        <div className="ty">
+          <div className="ty-check" aria-hidden="true">✓</div>
+          <h1 className="ty-title">Congratulations — your payment is confirmed!</h1>
+          <p className="ty-sub">
+            Thank you for booking your 1:1 Diabetes Recovery Assessment Call. Your payment
+            receipt has been sent to your email and WhatsApp.
+          </p>
+          <div className="ty-next">
+            <p className="ty-next-label">WHAT HAPPENS NEXT</p>
+            <p className="ty-next-head">
+              Our team will call you back shortly to schedule your one-to-one specialist
+              consultation.
+            </p>
+            <p className="ty-next-body">
+              Please keep your phone handy — most callbacks happen within the next few working
+              hours. We’re looking forward to partnering with you on your journey to reverse
+              diabetes and reclaim your health.
+            </p>
+          </div>
+        </div>
+      </main>
+    )
+  }
+
   return (
     <main className="pay-success-page">
       <div className="pay-success-card">
@@ -67,23 +97,6 @@ export default function PaymentSuccess() {
             <h3>Confirming your payment…</h3>
             <p className="caption">This takes a few seconds — please don’t close this page.</p>
           </>
-        )}
-
-        {status === 'success' && (
-          <div className="booking-done">
-            <div className="booking-tick" aria-hidden="true">✓</div>
-            <h3>Payment successful — slot confirmed</h3>
-            {info.date ? (
-              <p>
-                Your health assessment is booked for <strong>{fmtDate(info.date)}</strong> at{' '}
-                <strong>{info.time}</strong>.
-              </p>
-            ) : (
-              <p>Your payment is confirmed.</p>
-            )}
-            <p className="caption">Our team will call you. A confirmation has been sent on WhatsApp.</p>
-            <a className="cta" href="/">Done</a>
-          </div>
         )}
 
         {status === 'pending' && (

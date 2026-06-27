@@ -329,8 +329,15 @@ export default function BookingModal({ onClose }) {
     doneRef.current = true
     clearInterval(holdTimer.current)
     clearInterval(pollTimer.current)
-    trackAppointmentBooked() // booking confirmed → success card appears
-    if (!isFree) trackPurchase(50, 'INR') // free funnel has no purchase
+    trackAppointmentBooked() // booking confirmed
+    if (!isFree) {
+      trackPurchase(50, 'INR')
+      // Send paid customers to the full-page Thank You confirmation.
+      try { rzpRef.current?.close?.() } catch { /* ignore */ }
+      const phone = getLead()?.phone || ''
+      window.location.href = `/payment-success${phone ? `?phone=${encodeURIComponent(phone)}` : ''}`
+      return
+    }
     setConfirmed({ date: r.date, time: r.time })
     setStatus('done')
   }

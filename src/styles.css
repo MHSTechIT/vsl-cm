@@ -847,6 +847,48 @@ p:last-child { margin-bottom: 0; }
 .pay-success-card h3 { margin: 6px 0 8px; color: var(--accent-deep); font-size: 1.25rem; }
 .pay-success-card p { margin: 0 0 10px; color: var(--body); line-height: 1.6; }
 .pay-success-card .cta { margin-top: 18px; text-decoration: none; display: inline-block; }
+
+/* Full-page "Thank You" confirmation (shown after a confirmed payment) */
+.ty-page {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  padding: 40px 20px; background: #fff;
+}
+.ty { width: 100%; max-width: 680px; text-align: center; }
+.ty-check {
+  width: 78px; height: 78px; margin: 0 auto 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent-light), var(--accent-dark));
+  color: #fff; font-size: 2.3rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 14px 34px rgba(109, 40, 217, 0.35);
+}
+.ty-title {
+  margin: 0 0 18px; color: var(--accent-deep);
+  font-size: 2.1rem; line-height: 1.2; font-weight: 800;
+}
+.ty-sub {
+  margin: 0 auto 30px; max-width: 560px;
+  color: var(--body); font-size: 1.05rem; line-height: 1.65;
+}
+.ty-next {
+  text-align: left; border-radius: 18px; padding: 26px 30px;
+  background: linear-gradient(135deg, var(--accent-light), var(--accent-dark));
+  color: #fff; box-shadow: 0 18px 50px rgba(40, 28, 102, 0.22);
+}
+.ty-next-label {
+  margin: 0 0 12px; font-size: 0.78rem; font-weight: 700;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+}
+.ty-next-head { margin: 0 0 12px; font-size: 1.3rem; font-weight: 700; line-height: 1.35; }
+.ty-next-body { margin: 0; font-size: 0.98rem; line-height: 1.65; color: rgba(255, 255, 255, 0.9); }
+
+@media (max-width: 520px) {
+  .ty-title { font-size: 1.55rem; }
+  .ty-check { width: 66px; height: 66px; font-size: 1.9rem; }
+  .ty-next { padding: 22px 20px; }
+  .ty-next-head { font-size: 1.15rem; }
+}
 .pay-clock { background: #f59e0b; }
 .pay-spinner {
   width: 48px; height: 48px; margin: 4px auto 16px;
