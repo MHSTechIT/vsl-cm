@@ -329,15 +329,16 @@ export default function BookingModal({ onClose }) {
     doneRef.current = true
     clearInterval(holdTimer.current)
     clearInterval(pollTimer.current)
-    trackAppointmentBooked() // booking confirmed
     if (!isFree) {
-      trackPurchase(50, 'INR')
-      // Send paid customers to the full-page Thank You confirmation.
+      // Conversion events (AppointmentBooked + Purchase) are fired on the
+      // /payment-success page after this redirect — firing them here would be
+      // cancelled by the navigation, so the pixel never receives them.
       try { rzpRef.current?.close?.() } catch { /* ignore */ }
       const phone = getLead()?.phone || ''
       window.location.href = `/payment-success${phone ? `?phone=${encodeURIComponent(phone)}` : ''}`
       return
     }
+    trackAppointmentBooked() // free funnel: no redirect, fire here
     setConfirmed({ date: r.date, time: r.time })
     setStatus('done')
   }
@@ -375,61 +376,53 @@ export default function BookingModal({ onClose }) {
             </div>
           </div>
         ) : (
-          <>
-            <h3 className="modal-title">
-              {isFree ? 'Book your free masterclass slot' : 'Book your 1:1 consultation'}
+          <div className="bk2">
+            <img className="bk2-logo" src="/favicon.png" alt="My Health School" />
+            <h3 className="bk2-title">
+              {isFree ? 'Confirm your details' : 'Confirm your details'}
             </h3>
+            <p className="bk2-sub">
+              We’ll use these to confirm your 1:1 assessment call after payment.
+            </p>
 
+            <label className="bk2-label">FULL NAME</label>
             <input
-              className="reg-input"
+              className="bk2-input"
               placeholder="Your name"
               value={name}
               autoComplete="name"
               onChange={(e) => setName(e.target.value.replace(/[^A-Za-z ]/g, ''))}
             />
-            <input
-              className="reg-input"
-              type="tel"
-              inputMode="numeric"
-              placeholder="WhatsApp number"
-              value={phone}
-              maxLength={10}
-              autoComplete="tel"
-              onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-            />
 
-            <p className="caption modal-note">
-              Enter your details and continue to payment. Our team will contact you
-              on WhatsApp to schedule your consultation.
-            </p>
+            <label className="bk2-label">MOBILE NUMBER</label>
+            <div className="bk2-phone">
+              <span className="bk2-cc">🇮🇳 +91</span>
+              <input
+                className="bk2-input bk2-phone-input"
+                type="tel"
+                inputMode="numeric"
+                placeholder="9876543210"
+                value={phone}
+                maxLength={10}
+                autoComplete="tel"
+                onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+              />
+            </div>
 
             {err && <p className="reg-error">{err}</p>}
 
-            {status === 'paying' && paymentLink ? (
-              <div className="pay-wait">
-                <p>
-                  Complete the ₹50 payment in the Razorpay tab — <strong>use this same
-                  phone number</strong>. This page confirms automatically once it's paid.
-                </p>
-                <div className="pay-wait-actions">
-                  <a className="cta" href={paymentLink} target="_blank" rel="noopener noreferrer">
-                    Open payment page
-                  </a>
-                  <button className="cta cta-ghost" type="button" onClick={recheckPayment}>
-                    I've paid — check now
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <button
-                className="cta"
-                onClick={confirmAndPay}
-                disabled={!name.trim() || phone.length < 10 || status === 'paying'}
-              >
-                {status === 'paying' ? 'Processing…' : isFree ? 'Book My Free Slot' : 'Continue to Payment'}
-              </button>
-            )}
-          </>
+            <button
+              className="cta bk2-btn"
+              onClick={confirmAndPay}
+              disabled={!name.trim() || phone.length < 10 || status === 'paying'}
+            >
+              {status === 'paying' ? 'Processing…' : isFree ? 'Book My Free Slot' : 'Book Your Appointment'}
+            </button>
+
+            <p className="bk2-secure">
+              <span aria-hidden="true">🔒</span> Your payment is 100% secure · Powered by Razorpay
+            </p>
+          </div>
         )}
       </div>
     </div>

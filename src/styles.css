@@ -712,6 +712,34 @@ p:last-child { margin-bottom: 0; }
   cursor: pointer;
 }
 .modal-title { text-align: center; font-size: 1.2rem; margin: 0 0 18px; }
+
+/* Redesigned booking modal ("Confirm your details") */
+.bk2 { display: flex; flex-direction: column; }
+.bk2-logo { width: 46px; height: 46px; object-fit: contain; margin: 4px auto 12px; display: block; }
+.bk2-title { text-align: center; font-size: 1.5rem; font-weight: 800; color: var(--accent-deep); margin: 0 0 8px; }
+.bk2-sub { text-align: center; font-size: 0.95rem; line-height: 1.5; color: var(--body); margin: 0 auto 20px; max-width: 360px; }
+.bk2-label { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--body); margin: 12px 0 6px; }
+.bk2-input {
+  width: 100%; box-sizing: border-box;
+  padding: 13px 15px; font-size: 1rem; color: var(--ink);
+  background: #f5f3fc; border: 1.5px solid #e7e1f6; border-radius: 12px;
+}
+.bk2-input::placeholder { color: #a79fc4; }
+.bk2-input:focus { outline: none; border-color: var(--accent); background: #fff; }
+.bk2-phone { display: flex; gap: 8px; }
+.bk2-cc {
+  display: flex; align-items: center; gap: 4px;
+  padding: 0 14px; font-size: 1rem; font-weight: 600; color: var(--ink);
+  background: #f5f3fc; border: 1.5px solid #e7e1f6; border-radius: 12px; white-space: nowrap;
+}
+.bk2-phone-input { flex: 1; min-width: 0; }
+.bk2-btn { width: 100%; margin-top: 20px; border-radius: 999px; padding: 15px; font-size: 1.05rem; }
+.bk2-secure {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  margin: 16px 0 2px; padding: 11px 14px;
+  font-size: 0.82rem; color: var(--body); text-align: center;
+  background: #faf7ef; border: 1px solid #efe6cf; border-radius: 12px;
+}
 .modal-label {
   font-weight: 600;
   color: var(--ink);
