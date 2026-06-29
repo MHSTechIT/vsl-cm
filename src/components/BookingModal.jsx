@@ -95,6 +95,7 @@ export default function BookingModal({ onClose }) {
   const pollTimer = useRef(null)
   const rzpRef = useRef(null)
   const doneRef = useRef(false)
+  const convFired = useRef(false) // conversion pixels fired once on success
   const linkModeRef = useRef(false)
   const payingPhone = useRef('')
   const attemptSince = useRef(0) // epoch secs when this pay attempt began
@@ -107,6 +108,16 @@ export default function BookingModal({ onClose }) {
       clearInterval(pollTimer.current)
     }
   }, [])
+
+  // Fire the conversion pixels the moment the success view renders (once). Doing
+  // it here — not inside finish() — guarantees the Purchase event fires after the
+  // Thank You UI is on screen, on this same page, so Pixel Helper picks it up.
+  useEffect(() => {
+    if (status !== 'done' || convFired.current) return
+    convFired.current = true
+    trackAppointmentBooked()
+    if (!isFree) trackPurchase(50, 'INR')
+  }, [status])
 
   // Safety net for UPI QR payments: the Razorpay success callback doesn't
   // always fire (QR scanned on a phone, tab in background…), so poll the
@@ -331,12 +342,8 @@ export default function BookingModal({ onClose }) {
     clearInterval(holdTimer.current)
     clearInterval(pollTimer.current)
     try { rzpRef.current?.close?.() } catch { /* ignore */ }
-    // Fire conversion events on THIS page (no redirect) so every pixel event —
-    // Registered, AppointmentInterested, Purchase — lands on a single page.
-    trackAppointmentBooked()
-    if (!isFree) trackPurchase(50, 'INR')
     setConfirmed({ date: r.date, time: r.time })
-    setStatus('done') // shows the in-place Thank You overlay
+    setStatus('done') // shows the in-place Thank You overlay; pixels fire in the effect below
   }
 
   // Paid → full-screen Thank You on THIS page (no redirect, no extra URL).
