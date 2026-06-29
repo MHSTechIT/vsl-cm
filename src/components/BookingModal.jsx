@@ -3,6 +3,7 @@ import { api } from '../lib/api.js'
 import { getLead, saveLead } from '../lib/session.js'
 import { isFreeFunnel } from '../lib/funnel.js'
 import { trackAppointmentBooked, trackPurchase } from '../lib/tracking.js'
+import ThankYou from './ThankYou.jsx'
 
 const isFree = isFreeFunnel()
 
@@ -329,18 +330,23 @@ export default function BookingModal({ onClose }) {
     doneRef.current = true
     clearInterval(holdTimer.current)
     clearInterval(pollTimer.current)
-    if (!isFree) {
-      // Conversion events (AppointmentBooked + Purchase) are fired on the
-      // /payment-success page after this redirect — firing them here would be
-      // cancelled by the navigation, so the pixel never receives them.
-      try { rzpRef.current?.close?.() } catch { /* ignore */ }
-      const phone = getLead()?.phone || ''
-      window.location.href = `/payment-success${phone ? `?phone=${encodeURIComponent(phone)}` : ''}`
-      return
-    }
-    trackAppointmentBooked() // free funnel: no redirect, fire here
+    try { rzpRef.current?.close?.() } catch { /* ignore */ }
+    // Fire conversion events on THIS page (no redirect) so every pixel event —
+    // Registered, AppointmentInterested, Purchase — lands on a single page.
+    trackAppointmentBooked()
+    if (!isFree) trackPurchase(50, 'INR')
     setConfirmed({ date: r.date, time: r.time })
-    setStatus('done')
+    setStatus('done') // shows the in-place Thank You overlay
+  }
+
+  // Paid → full-screen Thank You on THIS page (no redirect, no extra URL).
+  if (status === 'done' && !isFree) {
+    return (
+      <div className="ty-overlay">
+        <button className="ty-overlay-close" onClick={onClose} aria-label="Close">×</button>
+        <ThankYou name={name.trim()} mobile={phone} onHome={onClose} />
+      </div>
+    )
   }
 
   return (
